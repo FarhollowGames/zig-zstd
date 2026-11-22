@@ -453,6 +453,8 @@ pub fn main(init: std.process.Init) !void {
         "untimed warm-up of each decoder, checked against the input, then the median of {d} " ++
         "timed passes, each decoding the set over and over to at least {d} MB, the decoders " ++
         "taking turns; MB are 1e6 decoded bytes", .{ runs, pass_bytes_min / 1_000_000 });
+    try info(w, markdown, "checksums: the port and the original verify every frame's; std's decoder " ++
+        "reads them unverified, as it panics when asked to verify (Zig 0.17.0)", .{});
     try info(w, markdown, "transparent huge pages off for the process", .{});
     try w.writeAll("\n");
 

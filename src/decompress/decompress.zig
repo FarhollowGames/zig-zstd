@@ -64,8 +64,9 @@ fn hashSetEmplaceDDict(hash_set: *DDictHashSet, ddict: *const DDict) Error!void 
             hash_set.ddict_ptr_table[idx] = ddict;
             return;
         }
-        idx &= idx_range_mask;
-        idx += 1;
+        // The original steps from the last slot to one past the table; the
+        // port goes back to the first.
+        idx = (idx + 1) & idx_range_mask;
     }
     hash_set.ddict_ptr_table[idx] = ddict;
     hash_set.ddict_ptr_count += 1;
@@ -92,9 +93,9 @@ fn hashSetGetDDict(hash_set: *const DDictHashSet, dict_id: u32) ?*const DDict {
     while (true) {
         const curr_dict_id = ddict_impl.getDictIdFromDDict(hash_set.ddict_ptr_table[idx]);
         if (curr_dict_id == dict_id or curr_dict_id == 0) break;
-        // Back to the start at the end of the table.
-        idx &= idx_range_mask;
-        idx += 1;
+        // Back to the start at the end of the table, where the original
+        // reads one past it.
+        idx = (idx + 1) & idx_range_mask;
     }
     return hash_set.ddict_ptr_table[idx];
 }
@@ -503,8 +504,10 @@ fn readSkippableFrameSize(src: []const u8) Error!usize {
 pub fn readSkippableFrame(dst: []u8, magic_variant: ?*u32, src: []const u8) Error!usize {
     if (src.len < skippable_header_size) return error.SrcSizeWrong;
     const magic_number = readLE32(src);
-    const skippable_frame_size = try readSkippableFrameSize(src);
-    const skippable_content_size = skippable_frame_size - skippable_header_size;
+    // The original keeps the size's error code as a size, larger than any
+    // input, and returns the checks' errors below instead.
+    const skippable_frame_size = readSkippableFrameSize(src) catch std.math.maxInt(usize);
+    const skippable_content_size = skippable_frame_size -% skippable_header_size;
     if (!isSkippableFrame(src)) return error.FrameParameterUnsupported;
     if (skippable_frame_size < skippable_header_size or skippable_frame_size > src.len) return error.SrcSizeWrong;
     if (skippable_content_size > dst.len) return error.DstSizeTooSmall;
@@ -680,8 +683,9 @@ pub fn decompressionMargin(src_in: []const u8) Error!usize {
 /// frame of `original_size` bytes in blocks of `block_size`, known before
 /// the frame is made. `block_size` is at least 1.
 pub fn decompressionMarginBound(original_size: usize, block_size: usize) usize {
-    return params.frame_header_size_max + 4 +
-        (if (original_size == 0) 0 else 3 * ((original_size + block_size - 1) / block_size)) + block_size;
+    // The macro's size_t sums wrap.
+    return params.frame_header_size_max + 4 +%
+        (if (original_size == 0) 0 else 3 *% ((original_size +% block_size -% 1) / block_size)) +% block_size;
 }
 
 // --------------------------------------------------------
@@ -912,7 +916,9 @@ pub fn decompressContinue(dctx: *DCtx, dst: []u8, src: []const u8) Error!usize {
     switch (dctx.stage) {
         .get_frame_header_size => {
             if (dctx.format == .zstd1) {
-                assert(src.len >= frame_id_size);
+                // Only a call of 0 bytes at the end of a frame gets here with
+                // less; the original then reads past its input.
+                if (src.len < frame_id_size) return error.SrcSizeWrong;
                 if (isSkippableMagic(readLE32(src))) {
                     @memcpy(dctx.header_buffer[0..src.len], src);
                     // The rest of the skippable frame's header.
@@ -965,11 +971,11 @@ pub fn decompressContinue(dctx: *DCtx, dst: []u8, src: []const u8) Error!usize {
         .decompress_last_block, .decompress_block => {
             const r_size: usize = switch (dctx.b_type) {
                 .compressed => blk: {
-                    assert(dctx.is_frame_decompression);
-                    const size = try block.decompressBlockInternal(dctx, dst, src, .is_streaming);
-                    // A compressed block is taken whole.
+                    const size = block.decompressBlockInternal(dctx, dst, src, .is_streaming);
+                    // A compressed block is taken whole, whether it decodes
+                    // or not.
                     dctx.expected = 0;
-                    break :blk size;
+                    break :blk try size;
                 },
                 .raw => blk: {
                     assert(src.len <= dctx.expected);
@@ -979,9 +985,9 @@ pub fn decompressContinue(dctx: *DCtx, dst: []u8, src: []const u8) Error!usize {
                     break :blk size;
                 },
                 .rle => blk: {
-                    const size = try setRleBlock(dst, src[0], dctx.rle_size);
+                    const size = setRleBlock(dst, src[0], dctx.rle_size);
                     dctx.expected = 0;
-                    break :blk size;
+                    break :blk try size;
                 },
                 .reserved => return error.CorruptionDetected,
             };
@@ -1427,7 +1433,8 @@ pub fn estimateDStreamSize(window_size: usize) Error!usize {
     const block_size = @min(window_size, params.block_size_max);
     const in_buff_size = block_size;
     const out_buff_size = try decodingBufferSizeMin(window_size, content_size_unknown);
-    return estimateDCtxSize() + in_buff_size + out_buff_size;
+    // The original's size_t sums wrap.
+    return estimateDCtxSize() +% in_buff_size +% out_buff_size;
 }
 
 /// `ZSTD_estimateDStreamSize_fromFrame`.
@@ -1785,7 +1792,8 @@ pub const FrameExactOptions = struct {
 };
 
 /// Decodes `src`, exactly one zstd frame, into `dst`, which must be the
-/// frame's decoded size, with the dictionary `dctx` refers to. It
+/// frame's decoded size, with the dictionary `dctx` refers to; with
+/// `ref_multiple_ddicts`, the one of the frame's dictionary id. It
 /// allocates nothing, so `dctx` can be one placed by `initDCtx`, and it
 /// verifies the frame's checksum when the frame has one, whatever the
 /// context's `force_ignore_checksum`. It refuses:
@@ -1809,6 +1817,13 @@ pub fn decompressFrameExact(dctx: *DCtx, dst: []u8, src: []const u8, options: Fr
     }
     if (options.require_checksum and !zfh.checksum_flag) return error.ChecksumWrong;
 
+    // With several dictionaries referenced, the frame's is picked before
+    // the frame starts, as a stream does; the one-shot functions start on
+    // the last one referenced.
+    if (dctx.ref_multiple_ddicts == .ref_multiple_ddicts and dctx.ddict_set != null) {
+        dctx.f_params = zfh;
+        selectFrameDDict(dctx);
+    }
     try decompressBeginUsingDDict(dctx, getDDict(dctx));
     block.checkContinuity(dctx, dst.ptr, dst.len);
     const saved = dctx.force_ignore_checksum;

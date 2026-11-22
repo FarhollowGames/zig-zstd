@@ -150,7 +150,8 @@ pub fn freeDDict(ddict: ?*DDict) void {
 
 /// `ZSTD_estimateDDictSize`: the bytes `initStaticDDict` needs.
 pub fn estimateDDictSize(dict_size: usize, dict_load_method: params.DictLoadMethod) usize {
-    return internal.ddict_object_size + (if (dict_load_method == .by_ref) 0 else dict_size);
+    // The original's size_t sum wraps.
+    return internal.ddict_object_size +% (if (dict_load_method == .by_ref) 0 else dict_size);
 }
 
 /// `ZSTD_sizeof_DDict`: the original's size for this dictionary.
