@@ -890,3 +890,40 @@ test "decompressFrameExact: one frame into its exact size, the checksum checked"
     try dctx.decompressFrameExact(out, frame, .{ .require_checksum = true });
     try testing.expectEqualSlices(u8, corpus[0..300_000], out);
 }
+
+test "in place: a frame at the end of its output buffer, with the margin" {
+    const input = try dc.mixedInput(1 << 20, 19);
+    defer gpa.free(input);
+    for ([_]i32{ 1, 19 }) |level| {
+        const frame = try dc.compress(&.{
+            .{ .param = dc.c_level, .value = level },
+            .{ .param = dc.c_checksum_flag, .value = 1 },
+        }, input);
+        defer gpa.free(frame);
+        const margin = try zstd.decompressionMargin(frame);
+        try testing.expectEqual(c.ZSTD_decompressionMargin(frame.ptr, frame.len), margin);
+        for ([_]usize{ 0, 1, 1000, input.len }) |original| {
+            for ([_]usize{ 1, 1000, 1 << 17 }) |block_size| {
+                try testing.expectEqual(
+                    c.reference_decompressionMargin(original, block_size),
+                    zstd.decompressionMarginBound(original, block_size),
+                );
+            }
+        }
+        // The frame copied to the end of the buffer, then decoded over itself.
+        const size = input.len + margin;
+        const expected = try gpa.alloc(u8, size);
+        defer gpa.free(expected);
+        const actual = try gpa.alloc(u8, size);
+        defer gpa.free(actual);
+        @memcpy(expected[size - frame.len ..], frame);
+        @memcpy(actual[size - frame.len ..], frame);
+        const pair = try Pair.init();
+        defer pair.deinit();
+        const code = c.ZSTD_decompressDCtx(pair.upstream, expected.ptr, size, expected[size - frame.len ..].ptr, frame.len);
+        const result = pair.port.decompressDCtx(actual, actual[size - frame.len ..]);
+        try expectSameResult(code, result);
+        try testing.expectEqualSlices(u8, input, actual[0..input.len]);
+        try testing.expectEqualSlices(u8, expected[0..input.len], actual[0..input.len]);
+    }
+}

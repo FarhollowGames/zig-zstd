@@ -676,6 +676,14 @@ pub fn decompressionMargin(src_in: []const u8) Error!usize {
     return margin;
 }
 
+/// `ZSTD_DECOMPRESSION_MARGIN`: a bound on `decompressionMargin` for a
+/// frame of `original_size` bytes in blocks of `block_size`, known before
+/// the frame is made. `block_size` is at least 1.
+pub fn decompressionMarginBound(original_size: usize, block_size: usize) usize {
+    return params.frame_header_size_max + 4 +
+        (if (original_size == 0) 0 else 3 * ((original_size + block_size - 1) / block_size)) + block_size;
+}
+
 // --------------------------------------------------------
 // Frame decompression
 // --------------------------------------------------------

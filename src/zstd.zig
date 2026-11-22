@@ -100,6 +100,7 @@ pub const findDecompressedSize = decompress_impl.findDecompressedSize;
 pub const findFrameCompressedSize = decompress_impl.findFrameCompressedSize;
 pub const decompressBound = decompress_impl.decompressBound;
 pub const decompressionMargin = decompress_impl.decompressionMargin;
+pub const decompressionMarginBound = decompress_impl.decompressionMarginBound;
 pub const getFrameHeader = decompress_impl.getFrameHeader;
 pub const getFrameHeaderAdvanced = decompress_impl.getFrameHeaderAdvanced;
 pub const frameHeaderSize = decompress_impl.frameHeaderSize;

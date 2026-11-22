@@ -1110,3 +1110,5 @@ pub extern fn HUF_decompress4X_hufOnly_wksp(dtable: [*]u32, dst: ?*anyopaque, ds
 pub extern fn HUF_decompress1X_usingDTable(dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, dtable: [*]const u32, flags: c_int) usize;
 pub extern fn HUF_decompress4X_usingDTable(dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, dtable: [*]const u32, flags: c_int) usize;
 pub extern fn HUF_selectDecoder(dst_size: usize, src_size: usize) c_uint;
+/// `ZSTD_DECOMPRESSION_MARGIN`, a macro, from test/reference.c.
+pub extern fn reference_decompressionMargin(original_size: usize, block_size: usize) usize;
