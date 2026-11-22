@@ -1,5 +1,92 @@
 # Benchmarks
 
+## Decompression
+
+`zig build bench-decompress` times three decoders on the same frames, one
+thread: the port's `decompressFrameExact`, Zig 0.17.0's
+`std.compress.zstd.Decompress`, and the original's `ZSTD_decompressDCtx`,
+built from `reference/` at -O3 with its x86-64 assembly Huffman loops, as
+upstream's library build. The frames are made as Loomwork makes its packs:
+one frame per asset, compressed by the port at level 19 with an 8 MiB
+window, a checksum and the content size. Every decoder's output is checked
+against the input in an untimed warm-up.
+
+The sets:
+
+- BC7 textures and BC5 normal maps: four 2048 x 2048 textures, mosaics of
+  seven photographs, with their mip chains, encoded with zig-bcn as
+  Loomwork's bake does (`bench/textures/README.md`). Each texture is one
+  frame of its whole mip chain (5.59 MB, Loomwork's packs today), or one
+  frame per mip, for streaming by mip (rows "mip 0", "mip 1", "mip 2": 4.19
+  MB, 1.05 MB, 0.26 MB).
+- Text and source: the Canterbury corpus's 10 text files and the 67 C files
+  of `reference/lib`, one frame a file.
+- A mixed pack: the texture chains, the text files and test/data's mesh
+  streams and snapshot pack, one frame an asset, taken in turn.
+
+The numbers below are one run on a shared cloud VM. They are measurements,
+not a verdict: runs of the same binary moved rows by 10% to 20% on this
+machine during the work, more on rows of short passes.
+
+- machine: a cloud VM, Intel(R) Xeon(R) Processor @ 2.30GHz (Granite Rapids), 4 logical CPUs, the run pinned to one (`taskset -c 2`); one thread
+- Zig 0.17.0, target x86_64-linux-gnu, CPU model graniterapids
+- port and std: ReleaseFast, for that target
+- original: zstd 1.5.7 from reference/, same target: -O3 -std=c99 -DXXH_NAMESPACE=ZSTD_ -DZSTD_MULTITHREAD -DZSTD_LEGACY_SUPPORT=0 -fno-sanitize=undefined -fPIC -fvisibility=hidden, plus huf_decompress_amd64.S on x86_64, as a shared library on glibc
+- frames: the port compressor at level 19, window log 23, with a checksum, one frame an asset
+- textures: 4 BC7 and 4 BC5 textures of 2048 x 2048, mosaics of photos, each a whole mip chain or one mip a frame
+- text and source: 10 Canterbury text files and 67 C files of reference/lib
+- method: a reused context per decoder and an output of the frame's size; an untimed warm-up of each decoder, checked against the input, then the median of 11 timed passes, each decoding the set over and over to at least 64 MB, the decoders taking turns; MB are 1e6 decoded bytes
+- checksums: the port and the original verify every frame's; std's decoder reads them unverified, as it panics when asked to verify (Zig 0.17.0)
+- transparent huge pages off for the process
+
+| set | a frame | frames | MB a frame | ratio | frames under 10% smaller | std MB/s | original MB/s | port MB/s | port / std | port / original |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| BC7 textures | mip chain | 4 | 5.59 | 1.354 | 0 | 19.3 | 625.2 | 725.6 | 37.7x | 1.16 |
+| BC7 textures | mip 0 (2048) | 4 | 4.19 | 1.378 | 0 | 20.9 | 737.5 | 846.7 | 40.5x | 1.15 |
+| BC7 textures | mip 1 (1024) | 4 | 1.05 | 1.267 | 0 | 15.7 | 764.9 | 880.6 | 56.1x | 1.15 |
+| BC7 textures | mip 2 (512) | 4 | 0.26 | 1.210 | 0 | 14.4 | 799.4 | 884.0 | 61.3x | 1.11 |
+| BC5 normal maps | mip chain | 4 | 5.59 | 1.285 | 0 | 20.4 | 579.5 | 643.7 | 31.6x | 1.11 |
+| BC5 normal maps | mip 0 (2048) | 4 | 4.19 | 1.305 | 0 | 20.6 | 677.7 | 696.9 | 33.8x | 1.03 |
+| BC5 normal maps | mip 1 (1024) | 4 | 1.05 | 1.208 | 0 | 16.7 | 736.0 | 837.4 | 50.2x | 1.14 |
+| BC5 normal maps | mip 2 (512) | 4 | 0.26 | 1.199 | 0 | 16.1 | 724.7 | 818.5 | 50.9x | 1.13 |
+| text and source | file | 77 | 0.13 | 4.385 | 0 | 153.1 | 1070.9 | 1157.6 | 7.6x | 1.08 |
+| mixed pack | asset | 87 | 0.63 | 1.510 | 0 | 22.9 | 665.4 | 744.1 | 32.4x | 1.12 |
+
+Seconds to decode each set once, median (min-max) of the passes:
+
+| set | std | original | port |
+| --- | ---: | ---: | ---: |
+| BC7 textures, one mip chain a frame | 1.1607 (1.1235-1.2021) | 0.0358 (0.0311-0.0432) | 0.0308 (0.0272-0.0373) |
+| BC7 textures, one mip 0 (2048) a frame | 0.8028 (0.7804-0.8667) | 0.0227 (0.0217-0.0263) | 0.0198 (0.0185-0.0219) |
+| BC7 textures, one mip 1 (1024) a frame | 0.2673 (0.2618-0.2904) | 0.0055 (0.0053-0.0056) | 0.0048 (0.0047-0.0052) |
+| BC7 textures, one mip 2 (512) a frame | 0.0728 (0.0700-0.0756) | 0.0013 (0.0012-0.0021) | 0.0012 (0.0011-0.0012) |
+| BC5 normal maps, one mip chain a frame | 1.0983 (1.0641-1.2796) | 0.0386 (0.0364-0.0627) | 0.0348 (0.0288-0.0433) |
+| BC5 normal maps, one mip 0 (2048) a frame | 0.8134 (0.7781-0.8303) | 0.0248 (0.0240-0.0325) | 0.0241 (0.0208-0.0299) |
+| BC5 normal maps, one mip 1 (1024) a frame | 0.2514 (0.2426-0.2593) | 0.0057 (0.0055-0.0073) | 0.0050 (0.0049-0.0071) |
+| BC5 normal maps, one mip 2 (512) a frame | 0.0653 (0.0626-0.0685) | 0.0014 (0.0014-0.0016) | 0.0013 (0.0012-0.0014) |
+| text and source, one file a frame | 0.0634 (0.0633-0.0655) | 0.0091 (0.0088-0.0106) | 0.0084 (0.0082-0.0098) |
+| mixed pack, one asset a frame | 2.4045 (2.2731-2.6433) | 0.0829 (0.0723-0.0944) | 0.0741 (0.0629-0.0801) |
+
+Notes:
+
+- **Frames under 10% smaller**: Loomwork stores an asset raw, as a copy,
+  when its frame is not at least a tenth smaller. With one frame an asset,
+  none is: the smallest ratio is 1.199 (BC5, mip 2). With the 256 KiB
+  chunks of an earlier run, 4 of 18 BC7 chunks and 8 of 18 BC5 chunks were.
+- **Larger frames decode more slowly** on every decoder: a whole mip chain
+  (5.59 MB) runs at 77% to 82% of the speed of its 1 MB mips, most likely
+  because its output, which the matches read back, is larger than this
+  machine's 2 MiB L2 cache.
+- **The checksum**: the port and the original verify every frame's (XXH64,
+  a few percent of the port's time on BC7 in a profile). std reads it unverified: with
+  `verify_checksum` it panics (std 0.17.0). This favours std.
+- **The Huffman loops**: the original runs its x86-64 assembly loops here;
+  the port runs its translation of the C loops. With the four streams'
+  containers in general registers (`inRegister`, doc/porting.md), the port's
+  loops are faster on this machine.
+
+## Compression
+
 `zig build bench` times the port in ReleaseFast against the original built
 from `reference/` at -O3, for the same target, on the Silesia corpus. The
 original is built as upstream's lib/Makefile builds libzstd.so, with `-fPIC
@@ -71,7 +158,7 @@ its sibling to be idle, so other work may have shared the other four:
 - level 19, sample, 4 workers: 1.060, within noise (the port 3.819 s
   (3.208-5.154), the original 3.604 s (3.478-3.891))
 
-## Transparent huge pages
+### Transparent huge pages
 
 The benchmark turns transparent huge pages off for its own process
 (`prctl(PR_SET_THP_DISABLE)`), so both sides' tables are on 4 KiB pages.
@@ -103,7 +190,7 @@ each order:
   4, sample, 1.003 (within noise; the port 0.071 s (0.070-0.071), the
   original 0.070 s (0.070-0.071))
 
-## Known biases
+### Known biases
 
 - The run takes a lock that keeps this project's builds off the machine, and
   waited until its core and that core's sibling were idle, but other
@@ -135,7 +222,7 @@ each order:
   distribution's libzstd.so. The port's calls to memcpy, memmove and memset go
   to Zig's own, in compiler_rt.
 
-## Where the port is slower
+### Where the port is slower
 
 - Levels 1 and 2 (fast): 1.1% and 1.2% slower, at every placement tried;
   level -1 0.6% slower. The fast block compressor's variants are

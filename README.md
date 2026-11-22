@@ -147,13 +147,15 @@ short:
 
 ## Tests
 
-`zig build test` runs 312 tests: 58 unit tests and 127 oracle tests, run
+`zig build test` runs 405 tests: 63 unit tests and 171 oracle tests, run
 twice, once with both sides on their SIMD paths and once with both on their
 scalar paths. The oracle tests run the original and the port on the same
 inputs (upstream's test files, the Silesia and Canterbury corpora, hand-made
-edge cases and seeded fuzzing) and compare every frame byte for byte and
-every returned value, and decode every frame back through std's decoder and
-the original's.
+edge cases and seeded fuzzing). For the compressor they compare every frame
+byte for byte and every returned value, and decode every frame back through
+std's decoder and the original's. For the decompressor they decode the same
+input on both sides, valid, corrupt, truncated or random, and compare every
+result code, every decoded byte and every stream position.
 
 - [`doc/TESTING.md`](doc/TESTING.md): how the tests compare the port with
   the original, and what this repository's tests cover.
@@ -162,8 +164,26 @@ the original's.
 
 ## Speed
 
-Port time against original time, one core, one-shot compression of the
-Silesia corpus:
+Decompression, one thread, frames as Loomwork's packs: one frame an asset at
+level 19 with an 8 MiB window and a checksum. Decoded MB a second:
+
+| set | std | original | port | port vs std | port vs original |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| BC7 textures, a 2K mip chain a frame (5.6 MB) | 19.3 | 625.2 | 725.6 | 37.7x | 1.16 |
+| BC7 textures, a 2K mip 0 a frame (4.2 MB) | 20.9 | 737.5 | 846.7 | 40.5x | 1.15 |
+| BC7 textures, a 1K mip a frame (1.0 MB) | 15.7 | 764.9 | 880.6 | 56.1x | 1.15 |
+| BC5 normal maps, a 2K mip chain a frame (5.6 MB) | 20.4 | 579.5 | 643.7 | 31.6x | 1.11 |
+| text and source, a file a frame | 153.1 | 1070.9 | 1157.6 | 7.6x | 1.08 |
+| mixed pack, an asset a frame | 22.9 | 665.4 | 744.1 | 32.4x | 1.12 |
+
+std is Zig 0.17.0's `std.compress.zstd`, which reads checksums without
+verifying them; the original is zstd 1.5.7 at -O3 with its x86-64 assembly
+Huffman loops. Intel Xeon (Granite Rapids) cloud VM, 4 logical CPUs, the run
+pinned to one; Zig 0.17.0 ReleaseFast. Rows move by 10% to 20% between runs
+on this machine.
+
+Compression, port time against original time, one core, one-shot
+compression of the Silesia corpus:
 
 | feature | time, port / original | port vs original |
 | --- | ---: | ---: |
@@ -187,8 +207,8 @@ original at `-O3` with upstream's shared-library flags, both for `znver5`;
 the median of five runs (three from level 16); transparent huge pages off
 for the benchmark.
 
-- [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): every level, the flags on both
-  sides, the biases and the command.
+- [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): every row of both benchmarks, the
+  flags on both sides, the biases and the commands.
 
 ## Licence
 

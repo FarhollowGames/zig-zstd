@@ -462,7 +462,7 @@ pub fn main(init: std.process.Init) !void {
 
     const version = c.ZSTD_versionNumber();
     try w.writeAll(if (markdown) "## zig-zstd decompression benchmark\n\n" else "zig-zstd decompression benchmark\n");
-    try info(w, markdown, "machine: {s}, {d} logical CPUs; one thread", .{
+    try info(w, markdown, "machine: {s}; one thread, on {d} logical CPUs the process may use", .{
         cpuModel(io, arena) orelse "unknown CPU",
         std.Thread.getCpuCount() catch 0,
     });
@@ -480,7 +480,7 @@ pub fn main(init: std.process.Init) !void {
     try info(w, markdown, "text and source: {d} Canterbury text files and {d} C files of reference/lib", .{
         canterbury_files, sources.len,
     });
-    try info(w, markdown, "method: a reused context per decoder and an output of the chunk's size; an " ++
+    try info(w, markdown, "method: a reused context per decoder and an output of the frame's size; an " ++
         "untimed warm-up of each decoder, checked against the input, then the median of {d} " ++
         "timed passes, each decoding the set over and over to at least {d} MB, the decoders " ++
         "taking turns; MB are 1e6 decoded bytes", .{ runs, pass_bytes_min / 1_000_000 });

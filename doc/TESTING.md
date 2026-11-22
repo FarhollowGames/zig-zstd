@@ -138,8 +138,7 @@ std's decoder (Zig 0.17.0) shape those round trips:
 
 ### Tests and counts
 
-`zig build test` runs 312 tests in about 25 minutes on the machine in
-[`BENCHMARKS.md`](BENCHMARKS.md): 58 unit tests in `src/`, and 127 oracle
+`zig build test` runs 405 tests: 63 unit tests in `src/`, and 171 oracle
 tests run twice, as `oracle` (the port's `@Vector` paths against the
 original's SIMD paths) and as `oracle-scalar` (both sides on their scalar
 paths). `-Dcorpus=false` skips the corpus tests, and `-Doracle-scalar=false`
@@ -238,7 +237,14 @@ that depend on the timing, in two runs of the original 9,167,360 and
 
 ### Build modes
 
-The recorded run is the default, ReleaseSafe: 310 of 312 pass, and the 2
+The decompressor's last runs (22 November, a 4-core cloud VM, with
+`-Dsilesia=false`, as Silesia's host cannot be reached from it): the whole
+suite in ReleaseSafe in 33 minutes, every test passing but the 3 Silesia
+corpus tests and the 32-bit-only test, skipped in each oracle binary; the
+decompressor's tests as a 32-bit x86 process (`-Dtarget=x86-linux-musl`)
+and in Debug at 100 fuzz cases, all passing.
+
+The compressor's recorded run is the default, ReleaseSafe: 310 of 312 pass, and the 2
 skipped are a 32-bit-only test, in each oracle binary. Four more runs check
 what the default run does not reach (the second and third were last made
 with 306 tests, before the 32-bit fixes):

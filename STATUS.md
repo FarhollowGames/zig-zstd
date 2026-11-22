@@ -69,16 +69,19 @@ no allocation, the checksum always verified. Each step of the method:
    context's size missed the original's BMI2 flag on 32-bit x86.
 8. Release candidate: version 0.2.0, this file, README, `doc/`.
 
-**Tests.** The decompressor's 29 oracle tests and the review's 13 pass in
-both oracle binaries (`oracle` against the original with its assembly,
+**Tests.** The whole suite passes (`zig build test -Dsilesia=false`, 405
+tests, 33 minutes here; the Silesia tests skip). The decompressor's 29 oracle
+tests and the review's 13 pass in both oracle binaries (`oracle` against the original with its assembly,
 `oracle-scalar` against its scalar build), as a 32-bit x86 process, and in
 Debug at 100 fuzz cases. Each fuzz test runs 1,000 cases.
 
-**Speed** (`zig build bench-decompress`, frames of 256 KiB chunks at level
-19, one thread; `doc/BENCHMARKS.md` has the table and the machine): the port
-is 40 to 55 times std's decoder on BC7 and BC5 blocks and about 10 times on
-text, and about as fast as the original's decoder with its assembly loops,
-from 0.9 to 1.2 times its speed by set and run.
+**Speed** (`zig build bench-decompress`, one frame an asset at level 19
+with an 8 MiB window, one thread pinned; `doc/BENCHMARKS.md` has the table
+and the machine): on 2048 x 2048 BC7 and BC5 textures the port is 32 to 61
+times std's decoder and 1.03 to 1.16 times the original's with its assembly
+loops (BC7 whole mip chains 726 MB/s, single mips 847 to 884 MB/s); on text
+and source 7.6 times std and 1.08 times the original (1158 MB/s). No asset's
+frame is under 10% smaller than the asset, so none would be stored raw.
 
 **For the author.**
 - Approved on 22 November: the x86-64 assembly Huffman loops, the switches
