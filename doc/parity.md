@@ -40,6 +40,15 @@ the port is not finished, so this list can still change.
   of corrupt input turn the assembly off on the original's side.
 - **Decoding contexts** keep pointers into themselves during a frame, as the
   original's do, so a `DCtx` must not move until its frame ends.
+- **Several `DDict`s, one shot.** With `ref_multiple_ddicts`, the
+  original's one-shot functions (`ZSTD_decompressDCtx`,
+  `ZSTD_decompress_usingDDict`) start each frame on the context's last
+  referenced `DDict`, and only then look the frame's dictionary id up: a
+  frame of another dictionary decodes with the wrong content and tables,
+  and fails or, without a checksum, gives wrong bytes. The port keeps that
+  behaviour in `decompressDCtx` and `decompressUsingDDict`. Streams pick the
+  frame's `DDict` first, in both. `decompressFrameExact`, the port's own,
+  picks it first too. Loomwork uses no dictionaries.
 - **The `DDict` set** (`ref_multiple_ddicts`) is the original's
   open-addressing table, but its probe wraps from the last slot to the
   first. The original's steps one past its table there, reading (and when a
@@ -133,18 +142,28 @@ The author approved leaving these out of the port:
   fuzzing build mode (`FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION`) and
   `ZSTD_RESIZE_SEQPOOL` (fixed to 0 in the original).
 
-Left out on the decompression side, not yet put to the author:
+On the decompression side, the author approved these on 22 November as
+deliberate differences from the original:
 
 - **The x86-64 assembly Huffman loops** (`huf_decompress_amd64.S`,
-  `ZSTD_DISABLE_ASM`). The port translates the C loops that the original
-  takes without the assembly; on the benchmark machine they decode faster
-  than the original's assembly does (doc/BENCHMARKS.md).
-- **Switches that pick one decoder at build time, for binary size**:
+  `ZSTD_DISABLE_ASM`). The port translates the C fast loops that the
+  original runs without its assembly, and gives the same bytes on valid
+  frames. On the benchmark machine they decode faster than the original's
+  assembly (doc/BENCHMARKS.md), and they stay pure Zig. On corrupt frames the
+  assembly can stop at other places than the C loops, so where the original
+  runs its assembly, its result on a corrupt frame can differ from the
+  port's; the oracle tests of corrupt input compare against the original's C
+  loops (`disable_huffman_assembly`), which the port matches.
+- **Switches that build one decoder of each kind, for binary size**:
   `HUF_FORCE_DECOMPRESS_X1`, `HUF_FORCE_DECOMPRESS_X2`,
   `ZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_LONG`,
-  `HUF_DISABLE_FAST_DECODE` (the fast loops can be turned off per call, as
-  the original's `HUF_flags_disableFast`), `ZSTD_NO_INLINE`.
-- **Build-time sizes left at their defaults**: `ZSTD_HEAPMODE` (the port
-  always takes an allocator), `ZSTD_MAXWINDOWSIZE_DEFAULT` (the
-  `window_log_max` parameter sets it), `ZSTD_NO_FORWARD_PROGRESS_MAX`,
-  `ZSTD_DECODER_INTERNAL_BUFFER`.
+  `HUF_DISABLE_FAST_DECODE`, `ZSTD_NO_INLINE`. Every decoder is compiled and
+  picked at run time as the original's default build picks it; the Huffman
+  fast loops can still be turned off per call (`Flags.disable_fast`, the
+  original's `HUF_flags_disableFast`).
+- **Build-time sizes, kept at the original's defaults**: `ZSTD_HEAPMODE`
+  (the port always takes an allocator, or a caller's memory),
+  `ZSTD_MAXWINDOWSIZE_DEFAULT` (the `window_log_max` parameter sets the
+  limit at run time), `ZSTD_NO_FORWARD_PROGRESS_MAX` (16),
+  `ZSTD_DECODER_INTERNAL_BUFFER` (64 KiB). Changing them in the original
+  changes no frame's bytes, only limits and memory.

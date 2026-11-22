@@ -3,13 +3,15 @@
 //! `ZSTD_decompressDCtx`, the original built from reference/ at -O3 with its x86-64 assembly
 //! Huffman loops.
 //!
-//! The frames are made as Loomwork makes its packs: every input is cut into chunks, and each
-//! chunk is one frame, compressed by the port at level 19 with a checksum and its content size.
-//! The data sets are BC7 texture blocks and BC5 normal-map blocks (bench/textures/README.md
-//! says how they are made), match-heavy text and source code (the Canterbury corpus's text
-//! files when it is fetched, and the C sources in reference/lib), and a mixed set standing in
-//! for a pack: the chunks of the other sets with test/data's mesh streams and snapshot pack,
-//! taken in turn.
+//! The frames are made as Loomwork makes its packs: one frame per asset, compressed by the
+//! port at level 19 with an 8 MiB window, a checksum and its content size. The sets are 2048 x
+//! 2048 BC7 textures and BC5 normal maps with their mip chains (bench/textures/README.md says
+//! how they are made), each as one frame per whole chain (about 5.6 MB, Loomwork's packs
+//! today) and as one frame per mip (4 MB, 1 MB and 256 KB, for streaming by mip); match-heavy
+//! text and source code, one frame a file (the Canterbury corpus's text files when it is
+//! fetched, and the C sources in reference/lib); and a mixed set standing in for a pack: the
+//! texture chains, the text files and test/data's mesh streams and snapshot pack, taken in
+//! turn.
 //!
 //! Each decoder decodes every frame of a set into an output of the frame's size, reused, with
 //! one reused context. An untimed warm-up of each decoder checks every output against the
@@ -17,8 +19,8 @@
 //! over and over to at least 64 MB, and a row gives the median. MB are 1e6 decoded bytes.
 //!
 //! Arguments after `--`: `--textures DIR` (default zig-out/bench-textures), the directory of
-//! the .bc7 and .bc5 files; `--runs N` (default 9); `--chunk KIB` adds rows of the BC7 set at
-//! that chunk size; `--markdown` prints the tables for doc/BENCHMARKS.md.
+//! the `tex<k>.mip<L>.bc7` and `.bc5` files; `--runs N` (default 9); `--markdown` prints the
+//! tables for doc/BENCHMARKS.md.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -27,8 +29,10 @@ const c = @import("upstream");
 const bench_options = @import("bench_options");
 
 const gpa = std.heap.c_allocator;
-const kib = 1024;
-const chunk_default = 256 * kib;
+/// The window Loomwork's packs are made with: 8 MiB.
+const window_log = 23;
+/// The mip levels of a 2048 x 2048 texture, from 2048 down to 4.
+const mip_levels = 10;
 const runs_default = 9;
 const level = 19;
 /// Loomwork stores a chunk raw when its frame is not at least a tenth smaller.
@@ -52,8 +56,8 @@ const Chunk = struct {
 const Set = struct {
     name: []const u8,
     chunks: []const Chunk,
-    chunk_size: usize,
-    files: usize,
+    /// What one frame holds, for the table.
+    frame_label: []const u8,
 
     fn inputBytes(set: Set) u64 {
         var n: u64 = 0;
@@ -91,6 +95,7 @@ const Compressor = struct {
     fn init() !Compressor {
         const cctx = try zstd.CCtx.create(gpa);
         _ = try cctx.setParameter(.compression_level, level);
+        _ = try cctx.setParameter(.window_log, window_log);
         _ = try cctx.setParameter(.checksum_flag, 1);
         return .{ .cctx = cctx };
     }
@@ -102,25 +107,50 @@ const Compressor = struct {
     }
 };
 
-/// Cuts every file into chunks of `chunk_size` and compresses each.
+/// One frame of each asset in `assets`.
 fn makeSet(
     arena: std.mem.Allocator,
     compressor: Compressor,
     name: []const u8,
-    files: []const []const u8,
-    chunk_size: usize,
+    frame_label: []const u8,
+    assets: []const []const u8,
 ) !Set {
     var chunks: std.ArrayList(Chunk) = .empty;
-    for (files) |file| {
-        var pos: usize = 0;
-        while (pos < file.len) {
-            const n = @min(chunk_size, file.len - pos);
-            const input = file[pos..][0..n];
-            try chunks.append(arena, .{ .input = input, .frame = try compressor.frame(arena, input) });
-            pos += n;
-        }
+    for (assets) |asset| {
+        try chunks.append(arena, .{ .input = asset, .frame = try compressor.frame(arena, asset) });
     }
-    return .{ .name = name, .chunks = chunks.items, .chunk_size = chunk_size, .files = files.len };
+    return .{ .name = name, .chunks = chunks.items, .frame_label = frame_label };
+}
+
+/// The textures of `dir` with the extension `ext`: each texture's mip levels, `tex<k>.mip<L>`.
+fn readTextures(io: std.Io, arena: std.mem.Allocator, dir: []const u8, ext: []const u8) ![]const [mip_levels][]const u8 {
+    var textures: std.ArrayList([mip_levels][]const u8) = .empty;
+    var k: usize = 0;
+    while (true) : (k += 1) {
+        var levels: [mip_levels][]const u8 = undefined;
+        for (&levels, 0..) |*mip_bytes, l| {
+            const path = try std.fmt.allocPrint(arena, "{s}/tex{d}.mip{d}.{s}", .{ dir, k, l, ext });
+            mip_bytes.* = std.Io.Dir.cwd().readFileAlloc(io, path, arena, .unlimited) catch |err| {
+                if (err == error.FileNotFound and l == 0) return textures.items;
+                return err;
+            };
+        }
+        try textures.append(arena, levels);
+    }
+}
+
+/// Each texture's whole mip chain, one buffer a texture.
+fn chains(arena: std.mem.Allocator, textures: []const [mip_levels][]const u8) ![]const []const u8 {
+    const out = try arena.alloc([]const u8, textures.len);
+    for (out, textures) |*chain, levels| chain.* = try std.mem.concat(arena, u8, &levels);
+    return out;
+}
+
+/// Level `level` of each texture.
+fn mips(arena: std.mem.Allocator, textures: []const [mip_levels][]const u8, mip: usize) ![]const []const u8 {
+    const out = try arena.alloc([]const u8, textures.len);
+    for (out, textures) |*bytes, levels| bytes.* = levels[mip];
+    return out;
 }
 
 /// The port's decoder for one frame of a known size: `decompressFrameExact`, which checks
@@ -320,6 +350,8 @@ fn readSources(io: std.Io, arena: std.mem.Allocator) ![]const []const u8 {
     return files.items;
 }
 
+const mip_labels = [_][]const u8{ "mip 0 (2048)", "mip 1 (1024)", "mip 2 (512)" };
+
 const canterbury_text = [_][]const u8{
     "canterbury/alice29.txt", "canterbury/asyoulik.txt", "canterbury/cp.html",
     "canterbury/fields.c",    "canterbury/grammar.lsp",  "canterbury/lcet10.txt",
@@ -354,7 +386,6 @@ pub fn main(init: std.process.Init) !void {
     var textures: []const u8 = "zig-out/bench-textures";
     var runs: usize = runs_default;
     var markdown = false;
-    var extra_chunks: std.ArrayList(usize) = .empty;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -366,9 +397,6 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, arg, "--runs") and i + 1 < args.len) {
             i += 1;
             runs = try std.fmt.parseInt(usize, args[i], 10);
-        } else if (std.mem.eql(u8, arg, "--chunk") and i + 1 < args.len) {
-            i += 1;
-            try extra_chunks.append(arena, kib * try std.fmt.parseInt(usize, args[i], 10));
         } else fatal("unknown argument {s}", .{arg});
     }
     if (builtin.os.tag == .linux) _ = try std.posix.prctl(.SET_THP_DISABLE, .{ 1, 0, 0, 0 });
@@ -377,10 +405,10 @@ pub fn main(init: std.process.Init) !void {
     var stdout = std.Io.File.stdout().writerStreaming(io, &buffer);
     const w = &stdout.interface;
 
-    const bc7 = try readFiles(io, arena, textures, ".bc7");
-    const bc5 = try readFiles(io, arena, textures, ".bc5");
+    const bc7 = try readTextures(io, arena, textures, "bc7");
+    const bc5 = try readTextures(io, arena, textures, "bc5");
     if (bc7.len == 0 or bc5.len == 0) {
-        fatal("no .bc7 and .bc5 files in {s}; bench/textures/README.md says how to make them", .{textures});
+        fatal("no tex<k>.mip<L>.bc7 and .bc5 files in {s}; bench/textures/README.md says how to make them", .{textures});
     }
     var text: std.ArrayList([]const u8) = .empty;
     var canterbury_files: usize = 0;
@@ -401,14 +429,23 @@ pub fn main(init: std.process.Init) !void {
 
     const compressor: Compressor = try .init();
     var sets: std.ArrayList(Set) = .empty;
-    const bc7_set = try makeSet(arena, compressor, "BC7 textures", bc7, chunk_default);
-    const bc5_set = try makeSet(arena, compressor, "BC5 normal maps", bc5, chunk_default);
-    const text_set = try makeSet(arena, compressor, "text and source", text.items, chunk_default);
-    const loomwork_set = try makeSet(arena, compressor, "mesh and snapshot", loomwork.items, chunk_default);
-    // The mixed pack: the chunks of every set in turn.
+    const bc7_chains = try makeSet(arena, compressor, "BC7 textures", "mip chain", try chains(arena, bc7));
+    const bc5_chains = try makeSet(arena, compressor, "BC5 normal maps", "mip chain", try chains(arena, bc5));
+    const text_set = try makeSet(arena, compressor, "text and source", "file", text.items);
+    const loomwork_set = try makeSet(arena, compressor, "mesh and snapshot", "file", loomwork.items);
+    try sets.append(arena, bc7_chains);
+    for (0..3) |mip| {
+        try sets.append(arena, try makeSet(arena, compressor, "BC7 textures", mip_labels[mip], try mips(arena, bc7, mip)));
+    }
+    try sets.append(arena, bc5_chains);
+    for (0..3) |mip| {
+        try sets.append(arena, try makeSet(arena, compressor, "BC5 normal maps", mip_labels[mip], try mips(arena, bc5, mip)));
+    }
+    try sets.append(arena, text_set);
+    // The mixed pack: the assets of the other sets in turn.
     var mixed: std.ArrayList(Chunk) = .empty;
     {
-        const parts = [_]Set{ bc7_set, bc5_set, text_set, loomwork_set };
+        const parts = [_]Set{ bc7_chains, bc5_chains, text_set, loomwork_set };
         var k: usize = 0;
         var added = true;
         while (added) : (k += 1) {
@@ -421,16 +458,7 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-    try sets.appendSlice(arena, &.{ bc7_set, bc5_set, text_set, .{
-        .name = "mixed pack",
-        .chunks = mixed.items,
-        .chunk_size = chunk_default,
-        .files = bc7_set.files + bc5_set.files + text_set.files + loomwork_set.files,
-    } });
-    for (extra_chunks.items) |size| {
-        try sets.append(arena, try makeSet(arena, compressor, "BC7 textures", bc7, size));
-        try sets.append(arena, try makeSet(arena, compressor, "BC5 normal maps", bc5, size));
-    }
+    try sets.append(arena, .{ .name = "mixed pack", .chunks = mixed.items, .frame_label = "asset" });
 
     const version = c.ZSTD_versionNumber();
     try w.writeAll(if (markdown) "## zig-zstd decompression benchmark\n\n" else "zig-zstd decompression benchmark\n");
@@ -445,7 +473,10 @@ pub fn main(init: std.process.Init) !void {
     try info(w, markdown, "original: zstd {d}.{d}.{d} from reference/, same target: {s}", .{
         version / 10000, version / 100 % 100, version % 100, original_flags,
     });
-    try info(w, markdown, "frames: the port compressor at level {d} with a checksum, one frame a chunk", .{level});
+    try info(w, markdown, "frames: the port compressor at level {d}, window log {d}, with a checksum, " ++
+        "one frame an asset", .{ level, window_log });
+    try info(w, markdown, "textures: {d} BC7 and {d} BC5 textures of 2048 x 2048, mosaics of photos, " ++
+        "each a whole mip chain or one mip a frame", .{ bc7.len, bc5.len });
     try info(w, markdown, "text and source: {d} Canterbury text files and {d} C files of reference/lib", .{
         canterbury_files, sources.len,
     });
@@ -459,7 +490,7 @@ pub fn main(init: std.process.Init) !void {
     try w.writeAll("\n");
 
     if (markdown) {
-        try w.writeAll("| set | chunk | chunks | MB | ratio | chunks under 10% smaller | std MB/s | " ++
+        try w.writeAll("| set | a frame | frames | MB a frame | ratio | frames under 10% smaller | std MB/s | " ++
             "original MB/s | port MB/s | port / std | port / original |\n");
         try w.writeAll("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
     }
@@ -472,20 +503,20 @@ pub fn main(init: std.process.Init) !void {
         const std_rate = result.std_.rate(bytes);
         const original_rate = result.original.rate(bytes);
         const row_args = .{
-            set.name,  set.chunk_size / kib, set.chunks.len,       @as(f64, @floatFromInt(bytes)) / 1e6,
+            set.name,  set.frame_label, set.chunks.len,       @as(f64, @floatFromInt(bytes)) / 1e6 / @as(f64, @floatFromInt(set.chunks.len)),
             ratio,     set.rawChunks(),      std_rate,             original_rate,
             port_rate, port_rate / std_rate, port_rate / original_rate,
         };
         if (markdown) {
-            try w.print("| {s} | {d} KiB | {d} | {d:.1} | {d:.3} | {d} | {d:.1} | {d:.1} | {d:.1} | {d:.1}x | {d:.2} |\n", row_args);
+            try w.print("| {s} | {s} | {d} | {d:.2} | {d:.3} | {d} | {d:.1} | {d:.1} | {d:.1} | {d:.1}x | {d:.2} |\n", row_args);
         } else {
-            try w.print("{s}, {d} KiB chunks: {d} chunks, {d:.1} MB, ratio {d:.3}, {d} under 10% smaller; " ++
+            try w.print("{s}, one {s} a frame: {d} frames of {d:.2} MB, ratio {d:.3}, {d} under 10% smaller; " ++
                 "std {d:.1} MB/s, original {d:.1} MB/s, port {d:.1} MB/s; port {d:.1}x std, {d:.2} of original\n", row_args);
         }
         try w.flush();
         var line: std.Io.Writer.Allocating = .init(arena);
-        try line.writer.print("| {s}, {d} KiB | {d:.4} ({d:.4}-{d:.4}) | {d:.4} ({d:.4}-{d:.4}) | {d:.4} ({d:.4}-{d:.4}) |\n", .{
-            set.name,                                  set.chunk_size / kib,
+        try line.writer.print("| {s}, one {s} a frame | {d:.4} ({d:.4}-{d:.4}) | {d:.4} ({d:.4}-{d:.4}) | {d:.4} ({d:.4}-{d:.4}) |\n", .{
+            set.name,                                  set.frame_label,
             Timing.seconds(result.std_.median_ns),     Timing.seconds(result.std_.min_ns),
             Timing.seconds(result.std_.max_ns),        Timing.seconds(result.original.median_ns),
             Timing.seconds(result.original.min_ns),    Timing.seconds(result.original.max_ns),

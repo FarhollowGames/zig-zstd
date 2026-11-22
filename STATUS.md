@@ -81,10 +81,12 @@ text, and about as fast as the original's decoder with its assembly loops,
 from 0.9 to 1.2 times its speed by set and run.
 
 **For the author.**
-- The left-out list on the decompression side, at the end of this file, is
-  not yet put to you: the x86-64 assembly Huffman loops, the switches that
-  build one decoder of each kind, and build-time sizes left at their
-  defaults.
+- Approved on 22 November: the x86-64 assembly Huffman loops, the switches
+  that build one decoder of each kind, and the build-time sizes stay out,
+  as deliberate differences listed in `doc/parity.md`; `.basic` BC7 is
+  what Loomwork's bake uses; Canterbury and the C sources stand for the
+  text set; Loomwork uses no dictionaries, and the original's behaviour
+  with several `DDict`s stays (`doc/parity.md`).
 - One-shot decompression with `ref_multiple_ddicts` loads the context's
   last `DDict` before the frame picks its own, in the original as in the
   port (`DCtx.decompressDCtx`, `decompressUsingDDict`): frames of other
@@ -94,11 +96,13 @@ from 0.9 to 1.2 times its speed by set and run.
   refused by the network policy): `-Dsilesia=false` runs the tests with
   Canterbury only, and the decompression benchmark's text set is
   Canterbury's text files and reference/lib's sources.
-- The BC7 and BC5 inputs are 7 photos from the scikit-image wheel, encoded
-  with zig-bcn `.basic` perceptual BC7 (bench/textures/README.md); which
-  settings Loomwork's bake uses is not written down in zig-bcn. Loomwork's
-  chunk size is not written down here either: the benchmark takes 256 KiB,
-  and `--chunk` adds rows of other sizes.
+- The BC7 and BC5 inputs are 2048 x 2048 mosaics of 7 photos from the
+  scikit-image wheel with their mip chains, encoded with zig-bcn `.basic`
+  perceptual BC7, as Loomwork's bake, and BC5 normal maps
+  (bench/textures/README.md). As Loomwork stores them, each asset is one
+  frame at level 19 with an 8 MiB window: a texture's whole mip chain
+  (about 5.6 MB), or with streaming each mip on its own (4 MB, 1 MB,
+  256 KB, ...).
 
 ## Step 4 report (11 November 2026)
 
@@ -730,12 +734,7 @@ Pushing: `main` and the review branch go to
 | `ZSTD_C_PREDICT` | an experimental, disabled path in `zstd_opt.c` |
 | `FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION` | changes the superblock's checks and the overflow correction for fuzzers; the second is the build option above |
 | `ZSTD_RESIZE_SEQPOOL` | fixed to 0 in the original |
-
-## Left out on the decompression side, not yet put to the author
-
-| original | reason |
-| --- | --- |
-| `huf_decompress_amd64.S`, `ZSTD_DISABLE_ASM` | the port translates the C fast loops the original takes without its assembly; on the benchmark machine they are faster than the assembly. `ZSTD_d_disableHuffmanAssembly` is set and read, and changes nothing |
-| `HUF_FORCE_DECOMPRESS_X1`, `HUF_FORCE_DECOMPRESS_X2`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_LONG`, `HUF_DISABLE_FAST_DECODE`, `ZSTD_NO_INLINE` | binary size: they build one decoder of each kind; every decoder is compiled. The Huffman fast loops can be turned off per call (`Flags.disable_fast`) |
-| `ZSTD_HEAPMODE`, `ZSTD_MAXWINDOWSIZE_DEFAULT`, `ZSTD_NO_FORWARD_PROGRESS_MAX`, `ZSTD_DECODER_INTERNAL_BUFFER` | build-time sizes, kept at their defaults: the port always takes an allocator, and `window_log_max` sets the window limit |
+| `huf_decompress_amd64.S`, `ZSTD_DISABLE_ASM` | approved 22 November, a deliberate difference (`doc/parity.md`): the port translates the C fast loops the original takes without its assembly; on the benchmark machine they are faster than the assembly. `ZSTD_d_disableHuffmanAssembly` is set and read, and changes nothing |
+| `HUF_FORCE_DECOMPRESS_X1`, `HUF_FORCE_DECOMPRESS_X2`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_LONG`, `HUF_DISABLE_FAST_DECODE`, `ZSTD_NO_INLINE` | approved 22 November (`doc/parity.md`): binary size: they build one decoder of each kind; every decoder is compiled. The Huffman fast loops can be turned off per call (`Flags.disable_fast`) |
+| `ZSTD_HEAPMODE`, `ZSTD_MAXWINDOWSIZE_DEFAULT`, `ZSTD_NO_FORWARD_PROGRESS_MAX`, `ZSTD_DECODER_INTERNAL_BUFFER` | approved 22 November (`doc/parity.md`): build-time sizes, kept at their defaults: the port always takes an allocator, and `window_log_max` sets the window limit |
 | `DYNAMIC_BMI2` on the decoder | as for the compressor: built for the target's CPU features |
