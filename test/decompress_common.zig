@@ -324,7 +324,7 @@ pub fn mixedInput(size: usize, seed: u32) ![]u8 {
     const random = prng.random();
     var pos: usize = 0;
     while (pos < size) {
-        const len = @min(size - pos, random.intRangeAtMost(usize, 1, 150_000));
+        const len: usize = @intCast(@min(size - pos, random.intRangeAtMost(u64, 1, 150_000)));
         const piece = out[pos..][0..len];
         switch (random.uintLessThan(u32, 5)) {
             0 => random.bytes(piece),

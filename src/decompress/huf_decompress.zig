@@ -51,6 +51,14 @@ fn setDTableDesc(table: [*]DTable, dtd: DTableDesc) void {
     table[0] = @bitCast(dtd);
 }
 
+const is_64bit = @sizeOf(usize) == 8;
+
+/// The four decodes the safe decoders make between reloads, as the
+/// original's `HUF_DECODE_SYMBOLX{1,2}_2`, `_1`, `_2`, `_0`: true for those
+/// made on 64-bit targets only (`_2`). `_1` decodes on every target, as the
+/// largest table log is 12.
+const symbols_between_reloads = [4]bool{ true, false, true, false };
+
 /// The fast loops need 64-bit little-endian words.
 const fast_loop_supported = @sizeOf(usize) == 8 and builtin.cpu.arch.endian() == .little;
 
@@ -139,7 +147,7 @@ fn initRemainingDStream(bit: *DStream, args: *const FastArgs, stream: usize, seg
     // `ip` may be up to 8 below the stream's end: the next bit to read is
     // the container's MSB, and the stream may be read whole.
     if (@intFromPtr(args.ip[stream]) + 8 < @intFromPtr(args.iend[stream])) return error.CorruptionDetected;
-    bit.bit_container = std.mem.readInt(u64, args.ip[stream][0..8], .little);
+    bit.bit_container = bitstream.readContainer(args.ip[stream]);
     bit.bits_consumed = @ctz(args.bits[stream]);
     bit.start = args.ilowest;
     bit.limit_ptr = bit.start + @sizeOf(usize);
@@ -272,13 +280,14 @@ inline fn decodeStreamX1(p_start: [*]u8, bit_d: *DStream, p_end: [*]u8, dt: [*]c
     var p = p_start;
     const left = @intFromPtr(p_end) - @intFromPtr(p);
     if (left > 3) {
-        // Up to 4 symbols at a time.
+        // Up to 4 symbols at a time; 2 on 32-bit targets.
         while ((bit_d.reload() == .unfinished) and @intFromPtr(p) < @intFromPtr(p_end) - 3) {
-            p[0] = decodeSymbolX1(bit_d, dt, dt_log);
-            p[1] = decodeSymbolX1(bit_d, dt, dt_log);
-            p[2] = decodeSymbolX1(bit_d, dt, dt_log);
-            p[3] = decodeSymbolX1(bit_d, dt, dt_log);
-            p += 4;
+            inline for (symbols_between_reloads) |wide| {
+                if (!wide or is_64bit) {
+                    p[0] = decodeSymbolX1(bit_d, dt, dt_log);
+                    p += 1;
+                }
+            }
         }
     } else {
         _ = bit_d.reload();
@@ -357,14 +366,20 @@ fn decompress4X1UsingDTableBody(dst: []u8, c_src: []const u8, dtable: [*]const D
     };
     var op = op_start;
 
-    // Up to 16 symbols a loop, 4 a stream.
+    // Up to 16 symbols a loop, 4 a stream; 2 a stream on 32-bit targets,
+    // whose container holds fewer bits (the original's
+    // `HUF_DECODE_SYMBOLX1_2` decodes on 64-bit targets only).
     if (@intFromPtr(oend) - @intFromPtr(op[3]) >= @sizeOf(usize)) {
         var end_signal = true;
         while (end_signal and @intFromPtr(op[3]) < olimit) {
-            inline for (0..4) |k| {
-                inline for (0..4) |s| op[s][k] = decodeSymbolX1(&bit_d[s], dt, dt_log);
+            inline for (symbols_between_reloads) |wide| {
+                if (!wide or is_64bit) {
+                    inline for (0..4) |s| {
+                        op[s][0] = decodeSymbolX1(&bit_d[s], dt, dt_log);
+                        op[s] += 1;
+                    }
+                }
             }
-            inline for (0..4) |s| op[s] += 4;
             // Every stream reloads, as the original's `&=` does.
             inline for (0..4) |s| end_signal = (bit_d[s].reloadFast() == .unfinished) and end_signal;
         }
@@ -756,10 +771,9 @@ inline fn decodeStreamX2(p_start: [*]u8, bit_d: *DStream, p_end: [*]u8, dt: [*]c
         } else {
             // Up to 8 symbols at a time.
             while ((bit_d.reload() == .unfinished) and @intFromPtr(p) < end - (@sizeOf(bitstream.Container) - 1)) {
-                if (@sizeOf(usize) == 8) p += decodeSymbolX2(p, bit_d, dt, dt_log);
-                p += decodeSymbolX2(p, bit_d, dt, dt_log);
-                if (@sizeOf(usize) == 8) p += decodeSymbolX2(p, bit_d, dt, dt_log);
-                p += decodeSymbolX2(p, bit_d, dt, dt_log);
+                inline for (symbols_between_reloads) |wide| {
+                    if (!wide or is_64bit) p += decodeSymbolX2(p, bit_d, dt, dt_log);
+                }
             }
         }
     } else {
@@ -811,7 +825,9 @@ fn decompress4X2UsingDTableBody(dst: []u8, c_src: []const u8, dtable: [*]const D
         while (end_signal and @intFromPtr(op[3]) < olimit) {
             inline for (.{ 0, 2 }) |first| {
                 inline for (first..first + 2) |s| {
-                    inline for (0..4) |_| op[s] += decodeSymbolX2(op[s], &bit_d[s], dt, dt_log);
+                    inline for (symbols_between_reloads) |wide| {
+                        if (!wide or is_64bit) op[s] += decodeSymbolX2(op[s], &bit_d[s], dt, dt_log);
+                    }
                 }
                 inline for (first..first + 2) |s| {
                     end_signal = (bit_d[s].reloadFast() == .unfinished) and end_signal;
