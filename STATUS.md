@@ -1,8 +1,8 @@
 # Port status
 
-Every public compression function, parameter, mode and build switch of zstd
-1.5.7 (`reference/lib/zstd.h`, `zdict.h`, the library's build macros), with
-its state:
+Every public compression and decompression function, parameter, mode and
+build switch of zstd 1.5.7 (`reference/lib/zstd.h`, `zdict.h`, the library's
+build macros), with its state:
 
 - **not started**: nothing in zig-zstd yet;
 - **ported**: translated, with no test against the original;
@@ -15,6 +15,90 @@ its state:
 The original is pinned in `reference/` (see `reference/README.md`): tag
 `v1.5.7`, commit `f8745da6ff1ad1e7bab384bd1f9d742439278e99`. `doc/porting.md`
 says how the code maps to it.
+
+## Decompressor report (22 November 2026)
+
+**Done.** The decompressor of zstd 1.5.7, from the same pinned commit, is
+ported on branch `decompressor`: the Huffman decoder with its C fast loops,
+the block decoder (every literals section, every sequence table mode, the
+three sequence loops), frames, skippable frames and the frame readers,
+dictionaries and `DDict`s, the buffer-less API, streaming, every
+decompression parameter, and static contexts. The author's 22 November
+decision put it here rather than in std. `DCtx.decompressFrameExact` is the
+port's own entry point for game packs: one frame into a buffer of its size,
+no allocation, the checksum always verified. Each step of the method:
+
+1. Pinned: the original in `reference/` is the compressor's; upstream's
+   `tests/golden-decompression` and `tests/golden-decompression-errors`,
+   from the same commit, are added to it.
+2. Inventory: the tables below, from "Decompression: frames" on.
+3. Oracle tests: `test/decompress_test.zig`, `test/dstream_test.zig` (one
+   or more tests per inventory row, each counting that its feature is in
+   the frames), `test/decompress_skeptic_test.zig` (the review's).
+4. Benchmark: `zig build bench-decompress` (`doc/BENCHMARKS.md`).
+5. Performance pass: the Huffman fast loops keep each stream's container in
+   a general register (LLVM's SLP vectorizer had packed them into one
+   vector register, an extract and an insert per symbol): BC7 frames went
+   from 563 to about 870 MB/s. `copy16` already compiles to one 16-byte
+   load and store; the sequence loop's hottest instruction is the match
+   copy's store, waiting on a load of bytes it just wrote, as in the
+   original. With the port at or past the original on each set, the pass
+   stopped there.
+6. Skeptic review: a separate agent, with guard pages, in-place decoding,
+   spliced and corrupted frames through every entry point; 7 findings.
+7. Fixed (`0e498d5`), each with the test that failed before:
+   - crash: the `DDict` set's probe stepped past its table from the last
+     slot, as the original's does (a read, and in emplace a write, past its
+     allocation); a frame's dictionary id could reach it. The port wraps
+     inside the table, a departure from the original noted in
+     `doc/parity.md`;
+   - crash: `estimateDStreamSize`, `estimateDDictSize` and
+     `decompressionMarginBound` overflowed where the original's sums wrap;
+   - `readSkippableFrame` gave other error codes than the original on a
+     frame that is not skippable and on a size that wraps;
+   - `nextSrcSizeToDecompress` after a failed compressed or RLE block was
+     not the original's 0;
+   - `decompressFrameExact` with several `DDict`s decoded with the last one
+     referenced (as the original's one-shot functions do); it now picks the
+     frame's by id first;
+   - the benchmark's method lines did not say that std reads checksums
+     unverified.
+   Found before the review, by the 32-bit run (`ac23df8`): the safe Huffman
+   decoders decoded 4 symbols a stream between reloads on 32-bit targets,
+   where the original decodes 2 (an assert failed on valid frames), and the
+   context's size missed the original's BMI2 flag on 32-bit x86.
+8. Release candidate: version 0.2.0, this file, README, `doc/`.
+
+**Tests.** The decompressor's 29 oracle tests and the review's 13 pass in
+both oracle binaries (`oracle` against the original with its assembly,
+`oracle-scalar` against its scalar build), as a 32-bit x86 process, and in
+Debug at 100 fuzz cases. Each fuzz test runs 1,000 cases.
+
+**Speed** (`zig build bench-decompress`, frames of 256 KiB chunks at level
+19, one thread; `doc/BENCHMARKS.md` has the table and the machine): the port
+is 40 to 55 times std's decoder on BC7 and BC5 blocks and about 10 times on
+text, and about as fast as the original's decoder with its assembly loops,
+from 0.9 to 1.2 times its speed by set and run.
+
+**For the author.**
+- The left-out list on the decompression side, at the end of this file, is
+  not yet put to you: the x86-64 assembly Huffman loops, the switches that
+  build one decoder of each kind, and build-time sizes left at their
+  defaults.
+- One-shot decompression with `ref_multiple_ddicts` loads the context's
+  last `DDict` before the frame picks its own, in the original as in the
+  port (`DCtx.decompressDCtx`, `decompressUsingDDict`): frames of other
+  dictionaries fail, or decode wrong without a checksum. Streams pick
+  first, and so does `decompressFrameExact`.
+- The Silesia corpus cannot be fetched from this environment (its host is
+  refused by the network policy): `-Dsilesia=false` runs the tests with
+  Canterbury only, and the decompression benchmark's text set is
+  Canterbury's text files and reference/lib's sources.
+- The BC7 and BC5 inputs are 7 photos from the scikit-image wheel, encoded
+  with zig-bcn `.basic` perceptual BC7 (bench/textures/README.md); which
+  settings Loomwork's bake uses is not written down in zig-bcn. Loomwork's
+  chunk size is not written down here either: the benchmark takes 256 KiB,
+  and `--chunk` adds rows of other sizes.
 
 ## Step 4 report (11 November 2026)
 
@@ -55,6 +139,13 @@ dictionaries (details below). `test/data/snapshot.bin` is a snapshot pack, not B
 pages. Open points for the review are listed below.
 
 ## Resume notes
+
+**The decompressor** (branch `decompressor`): `zig build test -Dsilesia=false
+-Dtest-filter=<name>` runs its tests by name (the test names start with the
+feature: `frames:`, `literals:`, `streaming:`, `fuzz:`, `skeptic`, ...).
+`zig build bench-decompress -- --textures DIR` needs the .bc7 and .bc5 files
+that bench/textures makes (its README has the commands). Profiling works with
+`perf record -e cpu-clock` (this VM has no hardware counters).
 
 Builds: one at a time, `timeout 3000 systemd-run --user --scope -q -p MemoryMax=6G
 zig build <step> -j3`, never while the scratchpad's `bench.running` exists.
@@ -345,6 +436,7 @@ Pushing: `main` and the review branch go to
 
 ## For the author
 
+- The decompressor's points are in its report at the top of this file.
 - std's decoder (`std.compress.zstd.Decompress`, Zig 0.17.0) cannot verify
   checksums: with `.verify_checksum = true`, any frame with a checksum and a
   non-empty block panics with "TODO all those bytes written needed to go
@@ -551,6 +643,67 @@ Pushing: `main` and the review branch go to
 | `zstdmt_compress.c`: jobs, overlap, job size, `rsyncable`, long distance matching across jobs, checksum, flush, frame progression, `updateCParams_whileCompressing` | `zstdmt.zig` on `std.Thread` and `std.Io` locks | oracle-tested (`test/mt_test.zig`: `ZSTDMT_initCStream_internal` and `ZSTDMT_compressStream_generic` driven as `ZSTD_compressStream2` drives them, every frame equal on every run; and through `compressStream2` and `compress2` in `test/stream_test.zig`) |
 | `ZSTD_createThreadPool`, `ZSTD_freeThreadPool`, `ZSTD_CCtx_refThreadPool`; `pool.c` | `pool.createThreadPool`, `pool.freeThreadPool`, `CCtx.refThreadPool`; `pool.ThreadPool` | ported (unit tests in `pool.zig`; oracle-tested as a context's shared pool) |
 
+## Decompression: frames
+
+| original | zig-zstd | state |
+| --- | --- | --- |
+| `ZSTD_decompress` | `decompress(gpa, ...)` | oracle-tested (a context from the allocator, as the original's default heap mode) |
+| `ZSTD_decompressDCtx` | `DCtx.decompressDCtx` | oracle-tested (`frames: ...`, every test in `test/decompress_test.zig`; whole output compared, every result code) |
+| several frames, skippable frames between them, garbage after a frame | in `decompressMultiFrame` | oracle-tested (`frames: one, several, empty, and skippable frames between them`) |
+| `ZSTD_f_zstd1_magicless` (`ZSTD_d_format`, `ZSTD_DCtx_setFormat`) | `.format`, `DCtx.setFormat` | oracle-tested (`frames: the magicless format`) |
+| frame header: descriptor, window descriptor with its mantissa, dictionary id of 1, 2 and 4 bytes, content size of 1, 2, 4 and 8 bytes, single segment, reserved bit | `getFrameHeaderAdvanced` | oracle-tested (`frame header: ...`, three tests: every descriptor byte with nine window bytes at every length in both formats, fuzzed bytes, and real frames of each field size) |
+| `ZSTD_getFrameHeader`, `_advanced`, `ZSTD_frameHeaderSize` | `getFrameHeader`, `getFrameHeaderAdvanced`, `frameHeaderSize` | oracle-tested (every field of the struct) |
+| `ZSTD_getFrameContentSize`, `ZSTD_getDecompressedSize`, `ZSTD_findDecompressedSize`, `ZSTD_findFrameCompressedSize`, `ZSTD_decompressBound`, `ZSTD_decompressionMargin` | same names | oracle-tested (on every header the header tests make) |
+| `ZSTD_DECOMPRESSION_MARGIN` | `decompressionMarginBound` | oracle-tested (`in place: ...`, decoding a frame over itself at the end of its buffer) |
+| `ZSTD_isFrame`, `ZSTD_isSkippableFrame`, `ZSTD_readSkippableFrame` | same names | oracle-tested (every magic variant and truncation) |
+| `ZSTD_getDictID_fromFrame`, `ZSTD_getDictID_fromDict`, `ZSTD_getDictID_fromDDict` | `getDictIdFromFrame`, `getDictIdFromDict`, `getDictIdFromDDict` | oracle-tested |
+| raw, RLE and compressed blocks, the last-block flag, blocks of exactly 128 KiB | in `decompressFrame`, `decompress_block.zig` | oracle-tested (`blocks: ...`, which counts each kind in the frames) |
+| checksum (XXH64): verified, wrong, cut off; `ZSTD_d_forceIgnoreChecksum` | `std.hash.XxHash64`, `.force_ignore_checksum` | oracle-tested (`checksum: ...`, every bit flip of the 4 bytes, one shot and streamed) |
+| one frame into a buffer of its size, no allocation, checksum always verified | `DCtx.decompressFrameExact`, `DCtx.init` | port only: tested against the input and the original's output (`decompressFrameExact: ...`) |
+
+## Decompression: entropy and sequences
+
+| original | zig-zstd | state |
+| --- | --- | --- |
+| literals: raw, RLE, Huffman with 1 or 4 streams, Huffman with the previous table (treeless) | `decodeLiteralsBlock` | oracle-tested (`literals: ...`, which counts each kind, 1 and 4 streams, X1 and X2, sections over 64 KiB) |
+| the literal buffer in the output, in the context, or split between them | `allocateLiteralsBuffer`, `decompressSequencesSplitLitBuffer` | oracle-tested (exact-size outputs, outputs with room, streaming, sections over 64 KiB) |
+| `HUF_readDTableX1_wksp`, `HUF_readDTableX2_wksp` | `readDTableX1Wksp`, `readDTableX2Wksp` | oracle-tested (`Huffman decoders: ...`, every table entry compared) |
+| `HUF_decompress1X_DCtx_wksp`, `HUF_decompress1X1_DCtx_wksp`, `HUF_decompress1X2_DCtx_wksp`, `HUF_decompress4X_hufOnly_wksp`, `HUF_decompress1X_usingDTable`, `HUF_decompress4X_usingDTable`, `HUF_selectDecoder` | same names, in `huf_decompress.zig` | oracle-tested (real blocks' sections, intact and corrupted, fast loops on and off) |
+| the fast 4-stream loops (`HUF_decompress4X{1,2}_usingDTable_internal_fast_c_loop`) | `decompress4X1FastLoop`, `decompress4X2FastLoop` | oracle-tested; the original's x86-64 assembly version of them is not ported (below) |
+| sequence tables: predefined, RLE, FSE, repeat, for each field (`ZSTD_buildSeqTable`, `ZSTD_buildFSETable`, `ZSTD_decodeSeqHeaders`) | same names | oracle-tested (`sequences: predefined, RLE, FSE and repeated tables for each field`, which counts each mode of each field) |
+| repeat offsets, after literals and after none | `decodeSequence` | oracle-tested (`sequences: repeat offsets, ...`, frames from sequences that use each repeat code) |
+| long offsets and the prefetching sequence decoder (`ZSTD_decompressSequencesLong`) | `decompressSequencesLong` | oracle-tested (`sequences: long offsets past 16 MiB, ...`; and with every cold dictionary) |
+| `ZSTD_decompressBlock`, `ZSTD_insertBlock` | `DCtx.decompressBlock`, `DCtx.insertBlock` | oracle-tested (`buffer-less: decompressBlock and insertBlock`) |
+
+## Decompression: dictionaries
+
+| original | zig-zstd | state |
+| --- | --- | --- |
+| `ZSTD_decompress_usingDict` (raw content, full dictionaries) | `DCtx.decompressUsingDict` | oracle-tested (trained, raw, upstream's golden and zero-weight dictionaries, levels 1, 5, 19) |
+| `ZSTD_createDDict`, `_byReference`, `_advanced`, `ZSTD_freeDDict`, `ZSTD_initStaticDDict` | `DDict.create`, `createByReference`, `createAdvanced`, `destroy`, `initStatic` | oracle-tested |
+| `ZSTD_decompress_usingDDict`, `ZSTD_DCtx_refDDict` | `DCtx.decompressUsingDDict`, `DCtx.refDDict` | oracle-tested |
+| `ZSTD_DCtx_loadDictionary`, `_byReference`, `_advanced` (each content type) | `DCtx.loadDictionary*` | oracle-tested |
+| `ZSTD_DCtx_refPrefix`, `_advanced` (one frame only) | `DCtx.refPrefix*` | oracle-tested |
+| `ZSTD_d_refMultipleDDicts` (each frame picks its dictionary by id, a hash set) | `.ref_multiple_ddicts` | oracle-tested (`dictionaries: several DDicts, ...`, past the set's first size) |
+| corrupted and truncated dictionaries | `loadDEntropy` | oracle-tested (`dictionaries: corrupted and truncated dictionaries`, fuzzed) |
+
+## Decompression: contexts, parameters, streaming
+
+| original | zig-zstd | state |
+| --- | --- | --- |
+| `ZSTD_createDCtx`, `ZSTD_freeDCtx`, `ZSTD_createDCtx_advanced` | `DCtx.create(gpa)`, `DCtx.destroy` | oracle-tested |
+| `ZSTD_initStaticDCtx`, `ZSTD_initStaticDStream` | `DCtx.initStatic` | oracle-tested (workspaces of the estimated size and one byte less, streaming) |
+| `ZSTD_copyDCtx` | `DCtx.copy` | oracle-tested (mid-frame, in the buffer-less test) |
+| `ZSTD_sizeof_DCtx`, `ZSTD_sizeof_DStream`, `ZSTD_sizeof_DDict`, `ZSTD_estimateDCtxSize`, `ZSTD_estimateDDictSize`, `ZSTD_estimateDStreamSize`, `_fromFrame`, `ZSTD_decodingBufferSize_min` | same names | oracle-tested (the original's sizes, from its object layouts) |
+| `ZSTD_DCtx_setParameter`, `ZSTD_DCtx_getParameter`, `ZSTD_dParam_getBounds`: `windowLogMax`, `format`, `stableOutBuffer`, `forceIgnoreChecksum`, `refMultipleDDicts`, `disableHuffmanAssembly`, `maxBlockSize` | `DCtx.setParameter`, `getParameter`, `dParamGetBounds` | oracle-tested (every value from 2 below to 2 above each bound, and the extremes) |
+| `ZSTD_DCtx_setMaxWindowSize`, `ZSTD_DCtx_reset` (each directive, mid-frame) | same names | oracle-tested |
+| buffer-less: `ZSTD_decompressBegin`, `_usingDict`, `_usingDDict`, `ZSTD_decompressContinue`, `ZSTD_nextSrcSizeToDecompress`, `ZSTD_nextInputType` | same names | oracle-tested (into one buffer and into two pieces, the first the previous segment) |
+| `ZSTD_decompressStream`, `ZSTD_decompressStream_simpleArgs` | `DCtx.decompressStream*` | oracle-tested (`streaming: ...`: every call's result, input and output positions; random sizes from 0 bytes up; several frames; the ring buffer wrapping) |
+| a bounded window: `ZSTD_d_windowLogMax`, frames that ask for more | `.window_log_max` | oracle-tested (`streaming: windows past the largest the stream accepts, and static streams`) |
+| `ZSTD_d_stableOutBuffer` | `.stable_out_buffer` | oracle-tested (a stable output, one too small, and one that moves) |
+| `ZSTD_createDStream`, `ZSTD_freeDStream`, `ZSTD_initDStream`, `_usingDict`, `_usingDDict`, `ZSTD_resetDStream`, `ZSTD_DStreamInSize`, `ZSTD_DStreamOutSize` | `DStream` (= `DCtx`), `initDStream*`, `resetDStream`, `dStreamInSize`, `dStreamOutSize` | oracle-tested |
+| corrupt and truncated input | every function | oracle-tested (`fuzz: corrupted and truncated frames, ...`, `fuzz: random bytes ...`, `golden frames: ...`: the same error code as the original, or the same bytes) |
+
 ## Build switches
 
 | original | zig-zstd | state |
@@ -566,8 +719,7 @@ Pushing: `main` and the review branch go to
 | original | reason |
 | --- | --- |
 | `ZDICT_*`: dictionary training (`zdict.c`, `cover.c`, `fastcover.c`, `divsufsort.c`) | the brief leaves it to the author; the tests use the original's trainer to make dictionaries |
-| decompression (`ZSTD_decompress*`, `ZSTD_DCtx*`, `ZSTD_DStream*`, `ZSTD_DDict*`, legacy formats) | Zig's std decompresses zstd; the port adds none |
-| `ZSTD_isFrame`, `ZSTD_isSkippableFrame`, `ZSTD_readSkippableFrame`, `ZSTD_getFrameContentSize`, `ZSTD_findFrameCompressedSize` | frame readers, on the decompression side |
+| the legacy formats (`ZSTD_LEGACY_SUPPORT`, `lib/legacy/`) | frames of zstd before 0.8, which the original's library build leaves out too. Approved on 11 November with the rest of decompression; decompression is now ported (22 November), the legacy formats are not |
 | `ZSTD_customMem` as a struct of callbacks | a `std.mem.Allocator` takes its place |
 | `DYNAMIC_BMI2`, `STATIC_BMI2` | run-time CPU dispatch; the port compiles for the target's CPU features, and the output does not depend on BMI2 |
 | `ZSTD_EXCLUDE_{DFAST,GREEDY,LAZY,LAZY2,BTLAZY2,BTOPT,BTULTRA}_BLOCK_COMPRESSOR` | binary size only; every strategy is compiled |
@@ -578,3 +730,12 @@ Pushing: `main` and the review branch go to
 | `ZSTD_C_PREDICT` | an experimental, disabled path in `zstd_opt.c` |
 | `FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION` | changes the superblock's checks and the overflow correction for fuzzers; the second is the build option above |
 | `ZSTD_RESIZE_SEQPOOL` | fixed to 0 in the original |
+
+## Left out on the decompression side, not yet put to the author
+
+| original | reason |
+| --- | --- |
+| `huf_decompress_amd64.S`, `ZSTD_DISABLE_ASM` | the port translates the C fast loops the original takes without its assembly; on the benchmark machine they are faster than the assembly. `ZSTD_d_disableHuffmanAssembly` is set and read, and changes nothing |
+| `HUF_FORCE_DECOMPRESS_X1`, `HUF_FORCE_DECOMPRESS_X2`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_LONG`, `HUF_DISABLE_FAST_DECODE`, `ZSTD_NO_INLINE` | binary size: they build one decoder of each kind; every decoder is compiled. The Huffman fast loops can be turned off per call (`Flags.disable_fast`) |
+| `ZSTD_HEAPMODE`, `ZSTD_MAXWINDOWSIZE_DEFAULT`, `ZSTD_NO_FORWARD_PROGRESS_MAX`, `ZSTD_DECODER_INTERNAL_BUFFER` | build-time sizes, kept at their defaults: the port always takes an allocator, and `window_log_max` sets the window limit |
+| `DYNAMIC_BMI2` on the decoder | as for the compressor: built for the target's CPU features |

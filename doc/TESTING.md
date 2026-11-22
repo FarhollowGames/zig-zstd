@@ -115,8 +115,22 @@ zig-zstd never builds or fetches it.
   the bucket offsets and the window after every step.
 - Parameters: their bounds, setting and reading them, contexts reused and
   reset, and the size estimates, which static contexts are then built with.
+- The decompressor decodes the same input on both sides and compares every
+  result code and every decoded byte: one shot into exact and larger
+  outputs; streamed call by call with the same input pieces and output
+  windows, each call's result and both positions compared; buffer-less,
+  each `nextSrcSizeToDecompress` and `nextInputType` compared; and through
+  the Huffman decoders on their own, every table entry compared. The inputs
+  are the original's frames (its compressor's output, which the port's
+  compressor matches byte for byte, and its golden files), and corrupt,
+  truncated and random bytes. Each feature's test counts, from the frames'
+  headers, that the feature it names is there: block types, literal
+  section types, 1 and 4 Huffman streams and which Huffman decoder the
+  original picks, each table mode of each sequence field, dictionary ids,
+  single-segment frames.
 
-Two limits of std's decoder (Zig 0.17.0) shape the round trips:
+The compressor's frames also round-trip through std's decoder. Two limits of
+std's decoder (Zig 0.17.0) shape those round trips:
 - it panics when asked to verify a checksum, so the tests decode through std
   without checksum verification and through the original with it;
 - it takes no dictionaries, so frames made with a dictionary or a prefix
@@ -147,6 +161,8 @@ the second run.
 | `test/stream_test.zig` | `compressStream2` and the streaming functions around it |
 | `test/mt_test.zig` | multithreaded compression |
 | `test/corpus_test.zig` | the corpora below |
+| `test/decompress_test.zig` | the decompressor: frames, the frame header, blocks, literals, sequences, repeat and long offsets, checksums, dictionaries, upstream's golden frames, the Canterbury corpus, in-place decoding, `decompressFrameExact` |
+| `test/dstream_test.zig` | the decompressor: streaming, the buffer-less API, parameters, sizes and static objects, the Huffman decoders, and its fuzzers |
 
 ### Inputs
 
@@ -161,6 +177,10 @@ the second run.
   (`test/data/README.md` says how each was made).
 - Hand-made edge cases, among them one-byte output windows and invalid
   sequences, which must fail with the original's errors.
+- For the decompressor, upstream's `tests/golden-decompression` (frames it
+  must decode) and `tests/golden-decompression-errors` (frames it must
+  refuse), and frame headers made by hand: every descriptor byte with
+  windows of every mantissa, and 8-byte content sizes.
 
 ### Fuzzing
 
@@ -168,6 +188,17 @@ Each fuzz test runs `-Dfuzz-cases` cases, 1,000 by default.
 `-Dfuzz-seed=N` is added to every fuzz test's first seed. Fuzzed inputs
 cover the entropy coders' inputs, the block compressors, parameter sets,
 streaming calls, long distance matching and caller sequences.
+
+The decompressor's fuzzers decode frames of random inputs and random
+compression parameters (level, window, checksum, content size, literal
+compression, target and largest block sizes, long distance matching) one
+shot into outputs of random sizes, streamed in random pieces (with a stable
+output in one case of 4) and through `decompressFrameExact`; corrupt frames
+from 1 to 4 random changes (flipped bits, bytes set, removed or inserted, a
+cut, mostly in the first 64 bytes where the headers and tables are), one
+shot and streamed; random bytes behind a valid frame and block header; and
+corrupt Huffman sections and dictionaries. Every result must be the
+original's.
 
 The parameter fuzzer (`compress2: fuzzed parameter sets ...`) sets up to 8
 parameters per case on a fresh context of each side, made one side after
@@ -182,11 +213,18 @@ log 22 and rate 9, so that its tables stay small.
 
 ### Malformed input
 
-A compressor reads no encoded input except the caller's dictionaries and
+The compressor reads no encoded input except the caller's dictionaries and
 sequences. Invalid sequences must give the original's errors. Malformed
 sequences and dictionaries that break the original's own asserts panic in
 a safe build, as [`parity.md`](parity.md) says; the tests stay clear of the
 two cases where the original then reads out of bounds.
+
+The decompressor reads untrusted frames and dictionaries: on corrupt,
+truncated and random input it must give the original's error code, or the
+original's bytes where the original decodes it, and never panic in a safe
+build. The tests of corrupt input turn the original's x86-64 assembly
+Huffman loops off, which stop at other places than its C loops on corrupt
+streams; on valid frames both run.
 
 ### Determinism
 
