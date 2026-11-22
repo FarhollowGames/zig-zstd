@@ -63,6 +63,12 @@ test {
 }
 
 test {
+    // The decompressor.
+    _ = @import("decompress_test.zig");
+    _ = @import("dstream_test.zig");
+}
+
+test {
     // The skeptics' probes are slow and large, so they run only with -Dskeptic.
     if (@import("test_options").skeptic) _ = @import("skeptic_test.zig");
 }

@@ -1021,3 +1021,92 @@ pub extern fn ZSTD_compressSequencesAndLiterals(
     lit_capacity: usize,
     decompressed_size: usize,
 ) usize;
+
+// --------------------------------------------------------
+// Decompression (zstd.h), and the Huffman decoder (huf.h)
+// --------------------------------------------------------
+
+pub const ZSTD_DCtx = anyopaque;
+pub const ZSTD_DDict = opaque {};
+
+pub const ZSTD_FrameHeader = extern struct {
+    frame_content_size: c_ulonglong,
+    window_size: c_ulonglong,
+    block_size_max: c_uint,
+    frame_type: c_uint,
+    header_size: c_uint,
+    dict_id: c_uint,
+    checksum_flag: c_uint,
+    reserved1: c_uint,
+    reserved2: c_uint,
+};
+
+pub extern fn ZSTD_decompressDCtx(dctx: *ZSTD_DCtx, dst: ?*anyopaque, dst_capacity: usize, src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_decompress_usingDDict(dctx: *ZSTD_DCtx, dst: ?*anyopaque, dst_capacity: usize, src: ?*const anyopaque, src_size: usize, ddict: ?*const ZSTD_DDict) usize;
+pub extern fn ZSTD_createDDict(dict: ?*const anyopaque, dict_size: usize) ?*ZSTD_DDict;
+pub extern fn ZSTD_createDDict_byReference(dict: ?*const anyopaque, dict_size: usize) ?*ZSTD_DDict;
+pub extern fn ZSTD_createDDict_advanced(dict: ?*const anyopaque, dict_size: usize, load_method: c_uint, content_type: c_uint, custom_mem: ZSTD_customMem) ?*ZSTD_DDict;
+pub extern fn ZSTD_freeDDict(ddict: ?*ZSTD_DDict) usize;
+pub extern fn ZSTD_initStaticDCtx(workspace: ?*anyopaque, workspace_size: usize) ?*ZSTD_DCtx;
+pub extern fn ZSTD_initStaticDDict(workspace: ?*anyopaque, workspace_size: usize, dict: ?*const anyopaque, dict_size: usize, load_method: c_uint, content_type: c_uint) ?*const ZSTD_DDict;
+pub extern fn ZSTD_DCtx_setParameter(dctx: *ZSTD_DCtx, param: c_uint, value: c_int) usize;
+pub extern fn ZSTD_DCtx_getParameter(dctx: *ZSTD_DCtx, param: c_uint, value: *c_int) usize;
+pub extern fn ZSTD_DCtx_reset(dctx: *ZSTD_DCtx, directive: c_uint) usize;
+pub extern fn ZSTD_DCtx_loadDictionary(dctx: *ZSTD_DCtx, dict: ?*const anyopaque, dict_size: usize) usize;
+pub extern fn ZSTD_DCtx_loadDictionary_byReference(dctx: *ZSTD_DCtx, dict: ?*const anyopaque, dict_size: usize) usize;
+pub extern fn ZSTD_DCtx_loadDictionary_advanced(dctx: *ZSTD_DCtx, dict: ?*const anyopaque, dict_size: usize, load_method: c_uint, content_type: c_uint) usize;
+pub extern fn ZSTD_DCtx_refPrefix(dctx: *ZSTD_DCtx, prefix: ?*const anyopaque, prefix_size: usize) usize;
+pub extern fn ZSTD_DCtx_refPrefix_advanced(dctx: *ZSTD_DCtx, prefix: ?*const anyopaque, prefix_size: usize, content_type: c_uint) usize;
+pub extern fn ZSTD_DCtx_refDDict(dctx: *ZSTD_DCtx, ddict: ?*const ZSTD_DDict) usize;
+pub extern fn ZSTD_DCtx_setMaxWindowSize(dctx: *ZSTD_DCtx, max_window_size: usize) usize;
+pub extern fn ZSTD_DCtx_setFormat(dctx: *ZSTD_DCtx, format: c_uint) usize;
+pub extern fn ZSTD_dParam_getBounds(param: c_uint) ZSTD_bounds;
+pub extern fn ZSTD_decompressStream(dctx: *ZSTD_DCtx, output: *ZSTD_outBuffer, input: *ZSTD_inBuffer) usize;
+pub extern fn ZSTD_decompressStream_simpleArgs(dctx: *ZSTD_DCtx, dst: ?*anyopaque, dst_capacity: usize, dst_pos: *usize, src: ?*const anyopaque, src_size: usize, src_pos: *usize) usize;
+pub extern fn ZSTD_initDStream(dctx: *ZSTD_DCtx) usize;
+pub extern fn ZSTD_initDStream_usingDict(dctx: *ZSTD_DCtx, dict: ?*const anyopaque, dict_size: usize) usize;
+pub extern fn ZSTD_initDStream_usingDDict(dctx: *ZSTD_DCtx, ddict: ?*const ZSTD_DDict) usize;
+pub extern fn ZSTD_resetDStream(dctx: *ZSTD_DCtx) usize;
+pub extern fn ZSTD_DStreamInSize() usize;
+pub extern fn ZSTD_DStreamOutSize() usize;
+pub extern fn ZSTD_getFrameHeader(zfh: *ZSTD_FrameHeader, src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_getFrameHeader_advanced(zfh: *ZSTD_FrameHeader, src: ?*const anyopaque, src_size: usize, format: c_uint) usize;
+pub extern fn ZSTD_frameHeaderSize(src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_findFrameCompressedSize(src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_findDecompressedSize(src: ?*const anyopaque, src_size: usize) c_ulonglong;
+pub extern fn ZSTD_getDecompressedSize(src: ?*const anyopaque, src_size: usize) c_ulonglong;
+pub extern fn ZSTD_decompressBound(src: ?*const anyopaque, src_size: usize) c_ulonglong;
+pub extern fn ZSTD_decompressionMargin(src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_isFrame(src: ?*const anyopaque, src_size: usize) c_uint;
+pub extern fn ZSTD_isSkippableFrame(src: ?*const anyopaque, src_size: usize) c_uint;
+pub extern fn ZSTD_readSkippableFrame(dst: ?*anyopaque, dst_capacity: usize, magic_variant: ?*c_uint, src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_getDictID_fromDict(dict: ?*const anyopaque, dict_size: usize) c_uint;
+pub extern fn ZSTD_getDictID_fromFrame(src: ?*const anyopaque, src_size: usize) c_uint;
+pub extern fn ZSTD_getDictID_fromDDict(ddict: ?*const ZSTD_DDict) c_uint;
+pub extern fn ZSTD_sizeof_DCtx(dctx: ?*const ZSTD_DCtx) usize;
+pub extern fn ZSTD_sizeof_DStream(dctx: ?*const ZSTD_DCtx) usize;
+pub extern fn ZSTD_sizeof_DDict(ddict: ?*const ZSTD_DDict) usize;
+pub extern fn ZSTD_estimateDCtxSize() usize;
+pub extern fn ZSTD_estimateDDictSize(dict_size: usize, load_method: c_uint) usize;
+pub extern fn ZSTD_estimateDStreamSize(window_size: usize) usize;
+pub extern fn ZSTD_estimateDStreamSize_fromFrame(src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_decodingBufferSize_min(window_size: c_ulonglong, frame_content_size: c_ulonglong) usize;
+pub extern fn ZSTD_decompressBegin(dctx: *ZSTD_DCtx) usize;
+pub extern fn ZSTD_decompressBegin_usingDict(dctx: *ZSTD_DCtx, dict: ?*const anyopaque, dict_size: usize) usize;
+pub extern fn ZSTD_decompressBegin_usingDDict(dctx: *ZSTD_DCtx, ddict: ?*const ZSTD_DDict) usize;
+pub extern fn ZSTD_decompressContinue(dctx: *ZSTD_DCtx, dst: ?*anyopaque, dst_capacity: usize, src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_nextSrcSizeToDecompress(dctx: *ZSTD_DCtx) usize;
+pub extern fn ZSTD_nextInputType(dctx: *ZSTD_DCtx) c_uint;
+pub extern fn ZSTD_decompressBlock(dctx: *ZSTD_DCtx, dst: ?*anyopaque, dst_capacity: usize, src: ?*const anyopaque, src_size: usize) usize;
+pub extern fn ZSTD_insertBlock(dctx: *ZSTD_DCtx, block_start: ?*const anyopaque, block_size: usize) usize;
+pub extern fn ZSTD_copyDCtx(dst: *ZSTD_DCtx, src: *const ZSTD_DCtx) void;
+
+pub extern fn HUF_readDTableX1_wksp(dtable: [*]u32, src: ?*const anyopaque, src_size: usize, workspace: ?*anyopaque, wksp_size: usize, flags: c_int) usize;
+pub extern fn HUF_readDTableX2_wksp(dtable: [*]u32, src: ?*const anyopaque, src_size: usize, workspace: ?*anyopaque, wksp_size: usize, flags: c_int) usize;
+pub extern fn HUF_decompress1X_DCtx_wksp(dtable: [*]u32, dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, workspace: ?*anyopaque, wksp_size: usize, flags: c_int) usize;
+pub extern fn HUF_decompress1X1_DCtx_wksp(dtable: [*]u32, dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, workspace: ?*anyopaque, wksp_size: usize, flags: c_int) usize;
+pub extern fn HUF_decompress1X2_DCtx_wksp(dtable: [*]u32, dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, workspace: ?*anyopaque, wksp_size: usize, flags: c_int) usize;
+pub extern fn HUF_decompress4X_hufOnly_wksp(dtable: [*]u32, dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, workspace: ?*anyopaque, wksp_size: usize, flags: c_int) usize;
+pub extern fn HUF_decompress1X_usingDTable(dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, dtable: [*]const u32, flags: c_int) usize;
+pub extern fn HUF_decompress4X_usingDTable(dst: ?*anyopaque, dst_size: usize, src: ?*const anyopaque, src_size: usize, dtable: [*]const u32, flags: c_int) usize;
+pub extern fn HUF_selectDecoder(dst_size: usize, src_size: usize) c_uint;

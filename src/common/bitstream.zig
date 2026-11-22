@@ -1,7 +1,8 @@
 //! Bit streams, from the original's bitstream.h. The entropy coders write a
 //! stream forward with `CStream`, and a decoder reads it backward with
-//! `DStream`, so the first bits written are the last read. The reader is
-//! here for the decoder of compressed Huffman weights in entropy_common.zig.
+//! `DStream`, so the first bits written are the last read. The decoder of
+//! compressed Huffman weights in entropy_common.zig and the decompressor read
+//! with it.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -117,7 +118,7 @@ pub const CStream = struct {
     }
 };
 
-inline fn readContainer(ptr: [*]const u8) Container {
+pub inline fn readContainer(ptr: [*]const u8) Container {
     return std.mem.readInt(Container, ptr[0..container_bytes], .little);
 }
 
@@ -197,6 +198,30 @@ pub const DStream = struct {
         return value;
     }
 
+    /// `BIT_skipBits`.
+    pub inline fn skipBits(bit_d: *DStream, nb_bits: u32) void {
+        bit_d.bits_consumed += nb_bits;
+    }
+
+    /// `BIT_reloadDStream_internal`: `bits_consumed` is at most the
+    /// container's width, and the bytes it covers are in the buffer.
+    inline fn reloadInternal(bit_d: *DStream) DStreamStatus {
+        assert(bit_d.bits_consumed <= container_bits);
+        bit_d.ptr -= bit_d.bits_consumed >> 3;
+        assert(@intFromPtr(bit_d.ptr) >= @intFromPtr(bit_d.start));
+        bit_d.bits_consumed &= 7;
+        bit_d.bit_container = readContainer(bit_d.ptr);
+        return .unfinished;
+    }
+
+    /// `BIT_reloadDStreamFast`: `bits_consumed` is at most the container's
+    /// width. Returns `overflow` once the pointer is below the limit, where
+    /// `reload` takes over.
+    pub inline fn reloadFast(bit_d: *DStream) DStreamStatus {
+        if (@intFromPtr(bit_d.ptr) < @intFromPtr(bit_d.limit_ptr)) return .overflow;
+        return bit_d.reloadInternal();
+    }
+
     /// `BIT_reloadDStream`: refills the register from the buffer, never
     /// reading before its start. Once in overflow a stream stays there,
     /// since `bits_consumed` only grows; the original also points `ptr` at
@@ -204,12 +229,7 @@ pub const DStream = struct {
     pub inline fn reload(bit_d: *DStream) DStreamStatus {
         if (bit_d.bits_consumed > container_bits) return .overflow;
         assert(@intFromPtr(bit_d.ptr) >= @intFromPtr(bit_d.start));
-        if (@intFromPtr(bit_d.ptr) >= @intFromPtr(bit_d.limit_ptr)) {
-            bit_d.ptr -= bit_d.bits_consumed >> 3;
-            bit_d.bits_consumed &= 7;
-            bit_d.bit_container = readContainer(bit_d.ptr);
-            return .unfinished;
-        }
+        if (@intFromPtr(bit_d.ptr) >= @intFromPtr(bit_d.limit_ptr)) return bit_d.reloadInternal();
         if (bit_d.ptr == bit_d.start) {
             if (bit_d.bits_consumed < container_bits) return .end_of_buffer;
             return .completed;

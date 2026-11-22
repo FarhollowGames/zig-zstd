@@ -49,6 +49,12 @@ pub fn build(b: *std.Build) void {
         "corpus",
         "Run the Silesia and Canterbury corpus tests (default true)",
     ) orelse true;
+    const silesia_on = b.option(
+        bool,
+        "silesia",
+        "Fetch and run the Silesia corpus, for the tests with -Dcorpus and the compression " ++
+            "benchmark (default: the value of -Dcorpus)",
+    ) orelse corpus;
     const skeptic = b.option(
         bool,
         "skeptic",
@@ -86,7 +92,7 @@ pub fn build(b: *std.Build) void {
     // oracle tests and the benchmark, and never for a package that depends
     // on this one.
     if (!b.isRoot()) return;
-    const silesia = if (corpus) b.lazyDependency("silesia", .{}) else null;
+    const silesia = if (corpus and silesia_on) b.lazyDependency("silesia", .{}) else null;
     const canterbury = if (corpus) b.lazyDependency("canterbury", .{}) else null;
 
     for (variants) |variant| {
@@ -97,6 +103,7 @@ pub fn build(b: *std.Build) void {
         options.addOption(bool, "skeptic", skeptic);
         options.addOption(bool, "simd", variant.port_simd);
         options.addOption(bool, "corpus", silesia != null and canterbury != null);
+        options.addOption(bool, "canterbury_corpus", canterbury != null);
         if (silesia) |dep| options.addOptionPathDirectory("silesia", dep.path("")) else {
             options.addOption([]const u8, "silesia", "");
         }
