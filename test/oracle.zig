@@ -72,3 +72,8 @@ test {
     // The skeptics' probes are slow and large, so they run only with -Dskeptic.
     if (@import("test_options").skeptic) _ = @import("skeptic_test.zig");
 }
+
+test {
+    // The decompressor skeptic's findings and probes.
+    _ = @import("decompress_skeptic_test.zig");
+}
