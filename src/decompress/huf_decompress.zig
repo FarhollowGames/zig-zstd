@@ -54,6 +54,18 @@ fn setDTableDesc(table: [*]DTable, dtd: DTableDesc) void {
 /// The fast loops need 64-bit little-endian words.
 const fast_loop_supported = @sizeOf(usize) == 8 and builtin.cpu.arch.endian() == .little;
 
+/// `value` unchanged, held in a general register. The fast loops keep the
+/// four streams' containers apart with it: LLVM's SLP vectorizer otherwise
+/// packs them into one vector register and pays an extract and an insert
+/// for every symbol's table lookup, a third slower on x86-64.
+inline fn inRegister(value: u64) u64 {
+    if (builtin.cpu.arch != .x86_64 and builtin.cpu.arch != .aarch64) return value;
+    return asm (""
+        : [out] "=r" (-> u64),
+        : [in] "0" (value),
+    );
+}
+
 /// `HUF_initFastDStream`: the fast loops' bit container, read from the MSB
 /// down, with a 1 set below the lowest valid bit.
 inline fn initFastDStream(ip: [*]const u8) u64 {
@@ -406,7 +418,7 @@ fn decompress4X1FastLoop(args: *FastArgs) void {
                 inline for (0..4) |s| {
                     const index: usize = @intCast(bits[s] >> 53);
                     const entry = dtable[index];
-                    bits[s] <<= @intCast(entry & 0x3F);
+                    bits[s] = inRegister(bits[s] << @intCast(entry & 0x3F));
                     op[s][symbol] = @truncate(entry >> 8);
                 }
             }
@@ -876,7 +888,7 @@ inline fn decodeX2Fast(bits: *u64, op: *[*]u8, dtable: [*]const DEltX2) void {
     const index: usize = @intCast(bits.* >> 53);
     const entry = dtable[index];
     std.mem.writeInt(u16, op.*[0..2], entry.sequence, .little);
-    bits.* <<= @intCast(entry.nb_bits & 0x3F);
+    bits.* = inRegister(bits.* << @intCast(entry.nb_bits & 0x3F));
     op.* += entry.length;
 }
 

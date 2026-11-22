@@ -151,6 +151,7 @@ pub fn build(b: *std.Build) void {
             "land, to test how much a row depends on where code sits (default 0)",
     ) orelse 0;
     addBench(b, target, intrinsics, multithread, silesia, bench_code_shift);
+    addDecompressBench(b, target, intrinsics, multithread, canterbury);
 }
 
 fn zstdModule(
@@ -226,6 +227,47 @@ fn addBench(
     run.addPassthruArgs();
     bench_step.dependOn(&run.step);
     bench_step.dependOn(&b.addInstallArtifact(bench, .{}).step);
+}
+
+/// `zig build bench-decompress`: the port's decoder against std's and the original's, on
+/// frames the port compresses at level 19. Arguments after `--` go to the benchmark; the
+/// binary is also installed as zig-out/bin/bench-decompress.
+fn addDecompressBench(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    intrinsics: bool,
+    multithread: bool,
+    canterbury: ?*std.Build.Dependency,
+) void {
+    const step = b.step("bench-decompress", "Time the port's decoder against std's and the original's (ReleaseFast)");
+    const options = b.addOptions();
+    if (canterbury) |dep| options.addOptionPathDirectory("canterbury", dep.path("")) else {
+        options.addOption([]const u8, "canterbury", "");
+    }
+    options.addOptionPathDirectory("reference", b.path("reference"));
+    options.addOptionPathDirectory("data", b.path("test/data"));
+    const bench = b.addExecutable(.{
+        .name = "bench-decompress",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/decompress_bench.zig"),
+            .target = target,
+            .optimize = .fast,
+            .link_libc = true,
+            .imports = &.{
+                .{
+                    .name = "zstd",
+                    .module = zstdModule(b, target, .fast, intrinsics, multithread, false),
+                },
+                .{ .name = "upstream", .module = upstreamModule(b, target) },
+                .{ .name = "bench_options", .module = options.createModule() },
+            },
+        }),
+    });
+    bench.root_module.linkLibrary(benchReferenceLibrary(b, target));
+    const run = b.addRunArtifact(bench);
+    run.addPassthruArgs();
+    step.dependOn(&run.step);
+    step.dependOn(&b.addInstallArtifact(bench, .{}).step);
 }
 
 fn upstreamModule(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {

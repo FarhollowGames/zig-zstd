@@ -1,0 +1,19 @@
+.{
+    .name = .bench_textures,
+    .version = "0.0.0",
+    .fingerprint = 0x8ffb87d0a8ef313, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .bcn = .{
+            .url = "git+https://github.com/farhollowgames/zig-bcn#73673bf162834090bbec7dcbdf806ede75362871",
+            .hash = "bcn-0.3.2-046PjbQtBQCOoMpkNXzvgLBLlZjvslPm9ASiUhstp59F",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "gen.zig",
+        "extract.py",
+        "README.md",
+    },
+}
