@@ -67,7 +67,8 @@ no allocation, the checksum always verified. Each step of the method:
    decoders decoded 4 symbols a stream between reloads on 32-bit targets,
    where the original decodes 2 (an assert failed on valid frames), and the
    context's size missed the original's BMI2 flag on 32-bit x86.
-8. Release candidate: version 0.2.0, this file, README, `doc/`.
+8. Release: version 0.2.0, this file, README, `doc/`; merged into `main`
+   and tagged `v0.2.0` on 23 November, at the author's request.
 9. A second review (23 November), through Loomwork's use: one frame an
    asset at level 19 with an 8 MiB window, `decompressFrameExact` with a
    required checksum on a reused `DCtx.init` context, in ReleaseFast. Its
@@ -90,19 +91,21 @@ no allocation, the checksum always verified. Each step of the method:
    context moved, copied or over random bytes, and no state of one asset
    reaching the next.
 
-**Tests.** The whole suite passes (`zig build test -Dsilesia=false`, 405
-tests, 33 minutes here; the Silesia tests skip). The decompressor's 29 oracle
+**Tests.** The whole suite passes (`zig build test -Dsilesia=false`, 23
+November: 415 of 423, 8 skipped, the Silesia tests and the 32-bit-only test
+in each oracle binary; 33 minutes here). The decompressor's 29 oracle
 tests and the review's 13 pass in both oracle binaries (`oracle` against the original with its assembly,
 `oracle-scalar` against its scalar build), as a 32-bit x86 process, and in
 Debug at 100 fuzz cases. Each fuzz test runs 1,000 cases.
 
 **Speed** (`zig build bench-decompress`, one frame an asset at level 19
-with an 8 MiB window, one thread pinned; `doc/BENCHMARKS.md` has the table
-and the machine): on 2048 x 2048 BC7 and BC5 textures the port is 32 to 61
-times std's decoder and 1.03 to 1.16 times the original's with its assembly
-loops (BC7 whole mip chains 726 MB/s, single mips 847 to 884 MB/s); on text
-and source 7.6 times std and 1.08 times the original (1158 MB/s). No asset's
-frame is under 10% smaller than the asset, so none would be stored raw.
+with an 8 MiB window, one thread pinned, on the code of 0.2.0;
+`doc/BENCHMARKS.md` has the table and the machine): on 2048 x 2048 BC7 and
+BC5 textures the port is 33 to 61 times std's decoder and 1.08 to 1.16
+times the original's with its assembly loops (BC7 whole mip chains 830
+MB/s, single mips 737 to 915 MB/s); on text and source 7.7 times std and
+1.11 times the original (1178 MB/s). No asset's frame is under 10% smaller
+than the asset, so none would be stored raw.
 
 **For the author.**
 - Approved on 22 November: the x86-64 assembly Huffman loops, the switches

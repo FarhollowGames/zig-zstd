@@ -138,7 +138,7 @@ std's decoder (Zig 0.17.0) shape those round trips:
 
 ### Tests and counts
 
-`zig build test` runs 405 tests: 63 unit tests in `src/`, and 171 oracle
+`zig build test` runs 423 tests: 63 unit tests in `src/`, and 180 oracle
 tests run twice, as `oracle` (the port's `@Vector` paths against the
 original's SIMD paths) and as `oracle-scalar` (both sides on their scalar
 paths). `-Dcorpus=false` skips the corpus tests, and `-Doracle-scalar=false`
@@ -161,6 +161,7 @@ the second run.
 | `test/mt_test.zig` | multithreaded compression |
 | `test/corpus_test.zig` | the corpora below |
 | `test/decompress_test.zig` | the decompressor: frames, the frame header, blocks, literals, sequences, repeat and long offsets, checksums, dictionaries, upstream's golden frames, the Canterbury corpus, in-place decoding, `decompressFrameExact` |
+| `test/decompress_skeptic_test.zig`, `test/decompress_loomwork_test.zig` | the decompressor's two reviews: a test per finding, and their probes that held up |
 | `test/dstream_test.zig` | the decompressor: streaming, the buffer-less API, parameters, sizes and static objects, the Huffman decoders, and its fuzzers |
 
 ### Inputs
@@ -237,10 +238,10 @@ that depend on the timing, in two runs of the original 9,167,360 and
 
 ### Build modes
 
-The decompressor's last runs (22 November, a 4-core cloud VM, with
+The decompressor's last runs (23 November, a 4-core cloud VM, with
 `-Dsilesia=false`, as Silesia's host cannot be reached from it): the whole
-suite in ReleaseSafe in 33 minutes, every test passing but the 3 Silesia
-corpus tests and the 32-bit-only test, skipped in each oracle binary; the
+suite in ReleaseSafe in 33 minutes, 415 of 423 passing and 8 skipped (the
+3 Silesia corpus tests and the 32-bit-only test, in each oracle binary); the
 decompressor's tests as a 32-bit x86 process (`-Dtarget=x86-linux-musl`)
 and in Debug at 100 fuzz cases, all passing.
 

@@ -24,7 +24,8 @@ The sets:
 - A mixed pack: the texture chains, the text files and test/data's mesh
   streams and snapshot pack, one frame an asset, taken in turn.
 
-The numbers below are one run on a shared cloud VM. They are measurements,
+The numbers below are one run on a shared cloud VM, on the code of release
+0.2.0 (23 November). They are measurements,
 not a verdict: runs of the same binary moved rows by 10% to 20% on this
 machine during the work, more on rows of short passes.
 
@@ -41,31 +42,31 @@ machine during the work, more on rows of short passes.
 
 | set | a frame | frames | MB a frame | ratio | frames under 10% smaller | std MB/s | original MB/s | port MB/s | port / std | port / original |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| BC7 textures | mip chain | 4 | 5.59 | 1.354 | 0 | 19.3 | 625.2 | 725.6 | 37.7x | 1.16 |
-| BC7 textures | mip 0 (2048) | 4 | 4.19 | 1.378 | 0 | 20.9 | 737.5 | 846.7 | 40.5x | 1.15 |
-| BC7 textures | mip 1 (1024) | 4 | 1.05 | 1.267 | 0 | 15.7 | 764.9 | 880.6 | 56.1x | 1.15 |
-| BC7 textures | mip 2 (512) | 4 | 0.26 | 1.210 | 0 | 14.4 | 799.4 | 884.0 | 61.3x | 1.11 |
-| BC5 normal maps | mip chain | 4 | 5.59 | 1.285 | 0 | 20.4 | 579.5 | 643.7 | 31.6x | 1.11 |
-| BC5 normal maps | mip 0 (2048) | 4 | 4.19 | 1.305 | 0 | 20.6 | 677.7 | 696.9 | 33.8x | 1.03 |
-| BC5 normal maps | mip 1 (1024) | 4 | 1.05 | 1.208 | 0 | 16.7 | 736.0 | 837.4 | 50.2x | 1.14 |
-| BC5 normal maps | mip 2 (512) | 4 | 0.26 | 1.199 | 0 | 16.1 | 724.7 | 818.5 | 50.9x | 1.13 |
-| text and source | file | 77 | 0.13 | 4.385 | 0 | 153.1 | 1070.9 | 1157.6 | 7.6x | 1.08 |
-| mixed pack | asset | 87 | 0.63 | 1.510 | 0 | 22.9 | 665.4 | 744.1 | 32.4x | 1.12 |
+| BC7 textures | mip chain | 4 | 5.59 | 1.354 | 0 | 20.3 | 714.7 | 830.3 | 40.8x | 1.16 |
+| BC7 textures | mip 0 (2048) | 4 | 4.19 | 1.378 | 0 | 20.5 | 637.8 | 737.0 | 36.0x | 1.16 |
+| BC7 textures | mip 1 (1024) | 4 | 1.05 | 1.267 | 0 | 16.2 | 785.5 | 887.6 | 54.9x | 1.13 |
+| BC7 textures | mip 2 (512) | 4 | 0.26 | 1.210 | 0 | 15.1 | 844.1 | 914.7 | 60.6x | 1.08 |
+| BC5 normal maps | mip chain | 4 | 5.59 | 1.285 | 0 | 20.9 | 612.2 | 698.4 | 33.4x | 1.14 |
+| BC5 normal maps | mip 0 (2048) | 4 | 4.19 | 1.305 | 0 | 21.9 | 650.5 | 724.3 | 33.0x | 1.11 |
+| BC5 normal maps | mip 1 (1024) | 4 | 1.05 | 1.208 | 0 | 17.7 | 755.2 | 853.7 | 48.3x | 1.13 |
+| BC5 normal maps | mip 2 (512) | 4 | 0.26 | 1.199 | 0 | 16.7 | 775.9 | 871.7 | 52.2x | 1.12 |
+| text and source | file | 77 | 0.13 | 4.385 | 0 | 152.5 | 1064.1 | 1177.9 | 7.7x | 1.11 |
+| mixed pack | asset | 87 | 0.63 | 1.510 | 0 | 24.2 | 742.9 | 813.7 | 33.6x | 1.10 |
 
 Seconds to decode each set once, median (min-max) of the passes:
 
 | set | std | original | port |
 | --- | ---: | ---: | ---: |
-| BC7 textures, one mip chain a frame | 1.1607 (1.1235-1.2021) | 0.0358 (0.0311-0.0432) | 0.0308 (0.0272-0.0373) |
-| BC7 textures, one mip 0 (2048) a frame | 0.8028 (0.7804-0.8667) | 0.0227 (0.0217-0.0263) | 0.0198 (0.0185-0.0219) |
-| BC7 textures, one mip 1 (1024) a frame | 0.2673 (0.2618-0.2904) | 0.0055 (0.0053-0.0056) | 0.0048 (0.0047-0.0052) |
-| BC7 textures, one mip 2 (512) a frame | 0.0728 (0.0700-0.0756) | 0.0013 (0.0012-0.0021) | 0.0012 (0.0011-0.0012) |
-| BC5 normal maps, one mip chain a frame | 1.0983 (1.0641-1.2796) | 0.0386 (0.0364-0.0627) | 0.0348 (0.0288-0.0433) |
-| BC5 normal maps, one mip 0 (2048) a frame | 0.8134 (0.7781-0.8303) | 0.0248 (0.0240-0.0325) | 0.0241 (0.0208-0.0299) |
-| BC5 normal maps, one mip 1 (1024) a frame | 0.2514 (0.2426-0.2593) | 0.0057 (0.0055-0.0073) | 0.0050 (0.0049-0.0071) |
-| BC5 normal maps, one mip 2 (512) a frame | 0.0653 (0.0626-0.0685) | 0.0014 (0.0014-0.0016) | 0.0013 (0.0012-0.0014) |
-| text and source, one file a frame | 0.0634 (0.0633-0.0655) | 0.0091 (0.0088-0.0106) | 0.0084 (0.0082-0.0098) |
-| mixed pack, one asset a frame | 2.4045 (2.2731-2.6433) | 0.0829 (0.0723-0.0944) | 0.0741 (0.0629-0.0801) |
+| BC7 textures, one mip chain a frame | 1.0994 (1.0668-1.1899) | 0.0313 (0.0299-0.0447) | 0.0269 (0.0256-0.0347) |
+| BC7 textures, one mip 0 (2048) a frame | 0.8197 (0.7900-0.8398) | 0.0263 (0.0234-0.0304) | 0.0228 (0.0188-0.0236) |
+| BC7 textures, one mip 1 (1024) a frame | 0.2592 (0.2505-0.2715) | 0.0053 (0.0050-0.0064) | 0.0047 (0.0046-0.0049) |
+| BC7 textures, one mip 2 (512) a frame | 0.0695 (0.0672-0.0728) | 0.0012 (0.0012-0.0015) | 0.0011 (0.0011-0.0012) |
+| BC5 normal maps, one mip chain a frame | 1.0695 (1.0252-1.1659) | 0.0365 (0.0322-0.0553) | 0.0320 (0.0280-0.0447) |
+| BC5 normal maps, one mip 0 (2048) a frame | 0.7653 (0.7411-0.8008) | 0.0258 (0.0233-0.0300) | 0.0232 (0.0202-0.0316) |
+| BC5 normal maps, one mip 1 (1024) a frame | 0.2371 (0.2304-0.2430) | 0.0056 (0.0054-0.0057) | 0.0049 (0.0047-0.0050) |
+| BC5 normal maps, one mip 2 (512) a frame | 0.0627 (0.0601-0.0640) | 0.0014 (0.0013-0.0016) | 0.0012 (0.0012-0.0013) |
+| text and source, one file a frame | 0.0636 (0.0617-0.0702) | 0.0091 (0.0084-0.0094) | 0.0082 (0.0076-0.0092) |
+| mixed pack, one asset a frame | 2.2741 (2.1802-2.3454) | 0.0742 (0.0721-0.0914) | 0.0678 (0.0621-0.0813) |
 
 Notes:
 
@@ -73,10 +74,10 @@ Notes:
   when its frame is not at least a tenth smaller. With one frame an asset,
   none is: the smallest ratio is 1.199 (BC5, mip 2). With the 256 KiB
   chunks of an earlier run, 4 of 18 BC7 chunks and 8 of 18 BC5 chunks were.
-- **Larger frames decode more slowly** on every decoder: a whole mip chain
-  (5.59 MB) runs at 77% to 82% of the speed of its 1 MB mips, most likely
-  because its output, which the matches read back, is larger than this
-  machine's 2 MiB L2 cache.
+- **Larger frames decode a little more slowly** on every decoder: a whole
+  mip chain (5.59 MB) ran at 82% to 94% of the speed of its 1 MB mips over
+  two runs, most likely because its output, which the matches read back, is
+  larger than this machine's 2 MiB L2 cache.
 - **The checksum**: the port and the original verify every frame's (XXH64,
   a few percent of the port's time on BC7 in a profile). std reads it unverified: with
   `verify_checksum` it panics (std 0.17.0). This favours std.

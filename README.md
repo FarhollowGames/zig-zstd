@@ -148,7 +148,7 @@ short:
 
 ## Tests
 
-`zig build test` runs 405 tests: 63 unit tests and 171 oracle tests, run
+`zig build test` runs 423 tests: 63 unit tests and 180 oracle tests, run
 twice, once with both sides on their SIMD paths and once with both on their
 scalar paths. The oracle tests run the original and the port on the same
 inputs (upstream's test files, the Silesia and Canterbury corpora, hand-made
@@ -170,12 +170,12 @@ level 19 with an 8 MiB window and a checksum. Decoded MB a second:
 
 | set | std | original | port | port vs std | port vs original |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BC7 textures, a 2K mip chain a frame (5.6 MB) | 19.3 | 625.2 | 725.6 | 37.7x | 1.16 |
-| BC7 textures, a 2K mip 0 a frame (4.2 MB) | 20.9 | 737.5 | 846.7 | 40.5x | 1.15 |
-| BC7 textures, a 1K mip a frame (1.0 MB) | 15.7 | 764.9 | 880.6 | 56.1x | 1.15 |
-| BC5 normal maps, a 2K mip chain a frame (5.6 MB) | 20.4 | 579.5 | 643.7 | 31.6x | 1.11 |
-| text and source, a file a frame | 153.1 | 1070.9 | 1157.6 | 7.6x | 1.08 |
-| mixed pack, an asset a frame | 22.9 | 665.4 | 744.1 | 32.4x | 1.12 |
+| BC7 textures, a 2K mip chain a frame (5.6 MB) | 20.3 | 714.7 | 830.3 | 40.8x | 1.16 |
+| BC7 textures, a 2K mip 0 a frame (4.2 MB) | 20.5 | 637.8 | 737.0 | 36.0x | 1.16 |
+| BC7 textures, a 1K mip a frame (1.0 MB) | 16.2 | 785.5 | 887.6 | 54.9x | 1.13 |
+| BC5 normal maps, a 2K mip chain a frame (5.6 MB) | 20.9 | 612.2 | 698.4 | 33.4x | 1.14 |
+| text and source, a file a frame | 152.5 | 1064.1 | 1177.9 | 7.7x | 1.11 |
+| mixed pack, an asset a frame | 24.2 | 742.9 | 813.7 | 33.6x | 1.10 |
 
 std is Zig 0.17.0's `std.compress.zstd`, which reads checksums without
 verifying them; the original is zstd 1.5.7 at -O3 with its x86-64 assembly
