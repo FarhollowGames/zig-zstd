@@ -83,7 +83,10 @@ pub const sequence_producer_error = compress_internal.sequence_producer_error;
 /// prefix until the next frame is decoded; the dictionary and the earlier
 /// outputs of a buffer-less frame until the frame ends; a static context's
 /// workspace for the context's whole life. The context points into itself
-/// during a frame, so it must not move until the frame ends.
+/// during a frame, so it must not move until the frame ends. One thread may
+/// use a context at a time; contexts share no state, so each thread can
+/// have its own. A context stays usable after a call fails: the next frame
+/// starts afresh.
 pub const DCtx = decompress_internal.DCtx;
 /// A decompression stream is a decompression context (`ZSTD_DStream`).
 pub const DStream = DCtx;

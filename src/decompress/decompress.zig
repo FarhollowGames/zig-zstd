@@ -1806,7 +1806,8 @@ pub const FrameExactOptions = struct {
 /// - a checksum that does not match, or with `require_checksum` none
 ///   (`error.ChecksumWrong`);
 /// - and anything the original's decoder refuses, with its error.
-/// On an error, the bytes of `dst` are unspecified.
+/// On an error, the bytes of `dst` are unspecified, and `dctx` can decode
+/// the next frame. One thread may use `dctx` at a time.
 pub fn decompressFrameExact(dctx: *DCtx, dst: []u8, src: []const u8, options: FrameExactOptions) Error!void {
     if (dctx.format == .zstd1 and isSkippableFrame(src)) return error.PrefixUnknown;
     var zfh: FrameHeader = .{};

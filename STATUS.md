@@ -68,6 +68,27 @@ no allocation, the checksum always verified. Each step of the method:
    where the original decodes 2 (an assert failed on valid frames), and the
    context's size missed the original's BMI2 flag on 32-bit x86.
 8. Release candidate: version 0.2.0, this file, README, `doc/`.
+9. A second review (23 November), through Loomwork's use: one frame an
+   asset at level 19 with an 8 MiB window, `decompressFrameExact` with a
+   required checksum on a reused `DCtx.init` context, in ReleaseFast. Its
+   tests are in `test/decompress_loomwork_test.zig`. Two findings, fixed:
+   - crash: `readNCount` (`entropy_common.zig`, shared with the
+     compressor's dictionary loading) cast a count of 32768 into an `i16`:
+     a panic in safe builds and undefined behaviour in ReleaseFast, from a
+     22-byte frame whose sequence or Huffman weight table has log 15 and one
+     symbol in every cell. The original stores it as a short, -32768, and
+     its callers refuse the table; the port now truncates as it does;
+   - a valid frame of an empty asset was refused (`error.DstSizeTooSmall`)
+     when the empty output came from an allocator, whose empty slices have
+     the address maxInt(usize): the block decoder's check of an output near
+     the top of the address space now passes empty outputs, as the
+     original's passes NULL.
+   And two documentation gaps, now in the doc comments: a context is used by
+   one thread at a time, and stays usable after a failed frame. Its probes
+   that held up: every asset size of the bake, windows at and past 8 MiB,
+   hostile frames against guard pages in ReleaseFast (30,000 cases), a
+   context moved, copied or over random bytes, and no state of one asset
+   reaching the next.
 
 **Tests.** The whole suite passes (`zig build test -Dsilesia=false`, 405
 tests, 33 minutes here; the Silesia tests skip). The decompressor's 29 oracle

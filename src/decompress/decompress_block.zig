@@ -1445,7 +1445,12 @@ pub fn decompressBlockInternal(dctx: *DCtx, dst: []u8, src_in: []const u8, strea
     const seq_h_size = try decodeSeqHeaders(dctx, &nb_seq, src);
     src = src[seq_h_size..];
     if (dst.len == 0 and nb_seq > 0) return error.DstSizeTooSmall;
-    if (!is_32bit and std.math.maxInt(usize) - @intFromPtr(dst.ptr) < 1 << 20) return error.DstSizeTooSmall;
+    // An output near the top of the address space is refused. An empty
+    // output is the original's NULL, which passes: an allocator's empty
+    // slice has the address maxInt(usize).
+    if (!is_32bit and dst.len != 0 and std.math.maxInt(usize) - @intFromPtr(dst.ptr) < 1 << 20) {
+        return error.DstSizeTooSmall;
+    }
 
     // With possible long offsets, or a block that may gain from
     // prefetching, look at the offset table.
