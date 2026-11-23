@@ -77,3 +77,8 @@ test {
     // The decompressor skeptic's findings and probes.
     _ = @import("decompress_skeptic_test.zig");
 }
+
+test {
+    // Loomwork's review of decompressFrameExact: findings and probes.
+    _ = @import("decompress_loomwork_test.zig");
+}
