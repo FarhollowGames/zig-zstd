@@ -1,7 +1,8 @@
 # Differences from the original
 
-zig-zstd translates zstd 1.5.7's compressor function by function and gives
-the original's frames. [`STATUS.md`](../STATUS.md) lists every function,
+zig-zstd translates zstd 1.5.7's compressor and decompressor function by
+function: it gives the original's frames, and decodes any input to the
+original's bytes or error. [`STATUS.md`](../STATUS.md) lists every function,
 parameter and build switch of the original with its counterpart and its
 state, and [`porting.md`](porting.md) the rules the translation follows. This
 file gives the reasons for each difference a caller can see. The review of
@@ -9,19 +10,67 @@ the port is not finished, so this list can still change.
 
 ## Additions
 
-None. The port has the original's compression features, and no more.
-Decompression is left to Zig's standard library (`std.compress.zstd`).
+- **`DCtx.decompressFrameExact` and `DCtx.init`.** Game packs store one frame
+  per chunk and know each chunk's decoded size. `decompressFrameExact`
+  decodes exactly one frame into a buffer of that size, refuses anything
+  else (a skippable frame, bytes after the frame, a size other than the
+  buffer's), and verifies the frame's checksum whatever the context's
+  `force_ignore_checksum`, with an option to refuse frames without one.
+  `DCtx.init` sets up a context in memory the caller owns; it never
+  allocates, as a static context with no room past itself. The original
+  needs `ZSTD_getFrameContentSize`, `ZSTD_findFrameCompressedSize` and
+  `ZSTD_decompressDCtx` with checks of its own for the same.
 
 ## Changes to expect
 
 - **Errors.** A function that returns a size or an error code in the
   original returns `Error!usize` (or `Error!void`), with the error named as
   in `src/error.zig`. Values that are not errors keep their meaning, such as
-  0 for "not compressible".
+  0 for "not compressible". `createDDict*` return the error where the
+  original returns NULL (`error.DictionaryCorrupted`, `error.MemoryAllocation`);
+  `ZSTD_DCtx_loadDictionary*` gives `error.MemoryAllocation` for both, as the
+  original does.
+- **Decompression parameters** are an enum (`params.DParameter`), so a
+  number the original refuses as unknown cannot be passed. The rest of the
+  parameter API refuses and accepts what the original does.
+- **`disable_huffman_assembly`** is set and read as in the original, and
+  changes nothing: the port has no assembly. The original's assembly loops
+  and the C loops the port translates give the same bytes on valid frames;
+  on a corrupt frame they can stop at different places, so the oracle tests
+  of corrupt input turn the assembly off on the original's side.
+- **Decoding contexts** keep pointers into themselves during a frame, as the
+  original's do, so a `DCtx` must not move until its frame ends.
+- **Several `DDict`s, one shot.** With `ref_multiple_ddicts`, the
+  original's one-shot functions (`ZSTD_decompressDCtx`,
+  `ZSTD_decompress_usingDDict`) start each frame on the context's last
+  referenced `DDict`, and only then look the frame's dictionary id up: a
+  frame of another dictionary decodes with the wrong content and tables,
+  and fails or, without a checksum, gives wrong bytes. The port keeps that
+  behaviour in `decompressDCtx` and `decompressUsingDDict`. Streams pick the
+  frame's `DDict` first, in both. `decompressFrameExact`, the port's own,
+  picks it first too. Loomwork uses no dictionaries.
+- **The `DDict` set** (`ref_multiple_ddicts`) is the original's
+  open-addressing table, but its probe wraps from the last slot to the
+  first. The original's steps one past its table there, reading (and when a
+  `DDict` is added, writing) past its allocation; a frame's dictionary id
+  can lead it there. Where the original reads past its table, the port's
+  result is the one a table without that bug gives.
+- **`decompressContinue` of 0 bytes** at the end of a frame, where the next
+  frame's header would start, is refused (`error.SrcSizeWrong`); the
+  original reads 4 bytes past its input there.
+- **Bytes past the decoded size** in the output buffer are unspecified, in
+  the original as in the port: both copy in 16- and 32-byte steps, and the
+  bytes over-copied there come from each side's own scratch buffers.
 - **Memory.** `ZSTD_customMem` is a `std.mem.Allocator`. A context made with
   `initStatic` has none and never allocates, as the original's static
   contexts do. `CCtx.generateSequences` takes an allocator for its scratch
-  frame, which the original mallocs.
+  frame, which the original mallocs. `decompress` takes the allocator its
+  context comes from, as `compress` does; the original's `ZSTD_decompress`
+  mallocs one (its default `ZSTD_HEAPMODE`). A static decompression context
+  cannot load a dictionary by copy or by reference
+  (`error.MemoryAllocation`), where the original's mallocs a `DDict`; it can
+  reference one with `refDDict`, and `initStaticDDict` places one in the
+  caller's memory.
 - **Static contexts.** Where the original mallocs even for a static
   context, the port refuses with `error.MemoryAllocation`: compressing with
   a dictionary loaded by reference (the original digests it into a `CDict`),
@@ -77,10 +126,8 @@ The author approved leaving these out of the port:
 
 - **Dictionary training** (`ZDICT_*`: `zdict.c`, `cover.c`, `fastcover.c`,
   `divsufsort.c`). The tests use the original's trainer to make dictionaries.
-- **Decompression and the frame readers** (`ZSTD_decompress*`, `ZSTD_DCtx*`,
-  `ZSTD_DStream*`, `ZSTD_DDict*`, the legacy formats, `ZSTD_isFrame`,
-  `ZSTD_isSkippableFrame`, `ZSTD_readSkippableFrame`, `ZSTD_getFrameContentSize`,
-  `ZSTD_findFrameCompressedSize`). Zig's std decompresses zstd.
+- **The legacy formats** (`ZSTD_LEGACY_SUPPORT`, `lib/legacy/`), frames of
+  zstd before 0.8. The original's library build leaves them out too.
 - **`ZSTD_customMem`**, a struct of allocation callbacks. A `std.mem.Allocator`
   takes its place.
 - **BMI2 run-time dispatch** (`DYNAMIC_BMI2`, `STATIC_BMI2`). The port is built
@@ -94,3 +141,29 @@ The author approved leaving these out of the port:
 - **`ZSTD_C_PREDICT`** (an experimental, disabled path in `zstd_opt.c`), the
   fuzzing build mode (`FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION`) and
   `ZSTD_RESIZE_SEQPOOL` (fixed to 0 in the original).
+
+On the decompression side, the author approved these on 22 November as
+deliberate differences from the original:
+
+- **The x86-64 assembly Huffman loops** (`huf_decompress_amd64.S`,
+  `ZSTD_DISABLE_ASM`). The port translates the C fast loops that the
+  original runs without its assembly, and gives the same bytes on valid
+  frames. On the benchmark machine they decode faster than the original's
+  assembly (doc/BENCHMARKS.md), and they stay pure Zig. On corrupt frames the
+  assembly can stop at other places than the C loops, so where the original
+  runs its assembly, its result on a corrupt frame can differ from the
+  port's; the oracle tests of corrupt input compare against the original's C
+  loops (`disable_huffman_assembly`), which the port matches.
+- **Switches that build one decoder of each kind, for binary size**:
+  `HUF_FORCE_DECOMPRESS_X1`, `HUF_FORCE_DECOMPRESS_X2`,
+  `ZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT`, `ZSTD_FORCE_DECOMPRESS_SEQUENCES_LONG`,
+  `HUF_DISABLE_FAST_DECODE`, `ZSTD_NO_INLINE`. Every decoder is compiled and
+  picked at run time as the original's default build picks it; the Huffman
+  fast loops can still be turned off per call (`Flags.disable_fast`, the
+  original's `HUF_flags_disableFast`).
+- **Build-time sizes, kept at the original's defaults**: `ZSTD_HEAPMODE`
+  (the port always takes an allocator, or a caller's memory),
+  `ZSTD_MAXWINDOWSIZE_DEFAULT` (the `window_log_max` parameter sets the
+  limit at run time), `ZSTD_NO_FORWARD_PROGRESS_MAX` (16),
+  `ZSTD_DECODER_INTERNAL_BUFFER` (64 KiB). Changing them in the original
+  changes no frame's bytes, only limits and memory.

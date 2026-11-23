@@ -49,6 +49,12 @@ pub fn build(b: *std.Build) void {
         "corpus",
         "Run the Silesia and Canterbury corpus tests (default true)",
     ) orelse true;
+    const silesia_on = b.option(
+        bool,
+        "silesia",
+        "Fetch and run the Silesia corpus, for the tests with -Dcorpus and the compression " ++
+            "benchmark (default: the value of -Dcorpus)",
+    ) orelse corpus;
     const skeptic = b.option(
         bool,
         "skeptic",
@@ -86,7 +92,7 @@ pub fn build(b: *std.Build) void {
     // oracle tests and the benchmark, and never for a package that depends
     // on this one.
     if (!b.isRoot()) return;
-    const silesia = if (corpus) b.lazyDependency("silesia", .{}) else null;
+    const silesia = if (corpus and silesia_on) b.lazyDependency("silesia", .{}) else null;
     const canterbury = if (corpus) b.lazyDependency("canterbury", .{}) else null;
 
     for (variants) |variant| {
@@ -97,6 +103,7 @@ pub fn build(b: *std.Build) void {
         options.addOption(bool, "skeptic", skeptic);
         options.addOption(bool, "simd", variant.port_simd);
         options.addOption(bool, "corpus", silesia != null and canterbury != null);
+        options.addOption(bool, "canterbury_corpus", canterbury != null);
         if (silesia) |dep| options.addOptionPathDirectory("silesia", dep.path("")) else {
             options.addOption([]const u8, "silesia", "");
         }
@@ -144,6 +151,7 @@ pub fn build(b: *std.Build) void {
             "land, to test how much a row depends on where code sits (default 0)",
     ) orelse 0;
     addBench(b, target, intrinsics, multithread, silesia, bench_code_shift);
+    addDecompressBench(b, target, intrinsics, multithread, canterbury);
 }
 
 fn zstdModule(
@@ -219,6 +227,47 @@ fn addBench(
     run.addPassthruArgs();
     bench_step.dependOn(&run.step);
     bench_step.dependOn(&b.addInstallArtifact(bench, .{}).step);
+}
+
+/// `zig build bench-decompress`: the port's decoder against std's and the original's, on
+/// frames the port compresses at level 19. Arguments after `--` go to the benchmark; the
+/// binary is also installed as zig-out/bin/bench-decompress.
+fn addDecompressBench(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    intrinsics: bool,
+    multithread: bool,
+    canterbury: ?*std.Build.Dependency,
+) void {
+    const step = b.step("bench-decompress", "Time the port's decoder against std's and the original's (ReleaseFast)");
+    const options = b.addOptions();
+    if (canterbury) |dep| options.addOptionPathDirectory("canterbury", dep.path("")) else {
+        options.addOption([]const u8, "canterbury", "");
+    }
+    options.addOptionPathDirectory("reference", b.path("reference"));
+    options.addOptionPathDirectory("data", b.path("test/data"));
+    const bench = b.addExecutable(.{
+        .name = "bench-decompress",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/decompress_bench.zig"),
+            .target = target,
+            .optimize = .fast,
+            .link_libc = true,
+            .imports = &.{
+                .{
+                    .name = "zstd",
+                    .module = zstdModule(b, target, .fast, intrinsics, multithread, false),
+                },
+                .{ .name = "upstream", .module = upstreamModule(b, target) },
+                .{ .name = "bench_options", .module = options.createModule() },
+            },
+        }),
+    });
+    bench.root_module.linkLibrary(benchReferenceLibrary(b, target));
+    const run = b.addRunArtifact(bench);
+    run.addPassthruArgs();
+    step.dependOn(&run.step);
+    step.dependOn(&b.addInstallArtifact(bench, .{}).step);
 }
 
 fn upstreamModule(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {

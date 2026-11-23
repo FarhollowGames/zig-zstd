@@ -117,7 +117,10 @@ pub fn readNCount(
                 assert(count == -1);
                 remaining += count;
             }
-            normalized_counter[charnum] = @intCast(count);
+            // A count of 32768 (table log 15, one symbol in every cell) does
+            // not fit; the original stores it as a short, -32768, and its
+            // callers refuse the table log.
+            normalized_counter[charnum] = @truncate(count);
             charnum += 1;
             previous0 = count == 0;
 

@@ -1,8 +1,8 @@
 # How the code maps to the original
 
-zig-zstd translates zstd 1.5.7's compressor (`reference/lib`) file by file and
-function by function, so that each piece can be read beside its original and
-produces the same bytes. These are the rules every file follows.
+zig-zstd translates zstd 1.5.7's compressor and decompressor (`reference/lib`)
+file by file and function by function, so that each piece can be read beside
+its original and produces the same bytes. These are the rules every file follows.
 
 ## Files
 
@@ -10,7 +10,7 @@ produces the same bytes. These are the rules every file follows.
 | --- | --- |
 | `common/zstd_internal.h` | `src/common/zstd_internal.zig` (constants and code tables) |
 | `common/fse.h`, `common/huf.h` | `src/common/fse.zig`, `src/common/huf.zig` (constants, table sizes) |
-| `common/bitstream.h` (writer, and the reader the weight decoder needs) | `src/common/bitstream.zig` |
+| `common/bitstream.h` (writer and reader) | `src/common/bitstream.zig` |
 | `common/entropy_common.c`, `common/fse_decompress.c` | `src/common/entropy_common.zig` (`FSE_readNCount`, `HUF_readStats` and the FSE decoder of compressed Huffman weights, for dictionaries) |
 | `common/error_private.h`, `zstd_errors.h` | `src/error.zig` |
 | `common/xxhash.h` | `std.hash.XxHash64` |
@@ -32,8 +32,13 @@ produces the same bytes. These are the rules every file follows.
 | `compress/zstd_ldm.c`, `zstd_ldm_geartab.h` | `src/compress/ldm.zig` |
 | `compress/zstd_compress.c` | `src/compress/compress.zig` |
 | `compress/zstdmt_compress.c` | `src/compress/zstdmt.zig` |
-| `zstd.h` (compression types) | `src/params.zig` |
-| `zstd.h` (compression functions) | `src/zstd.zig`, the public root |
+| `decompress/huf_decompress.c` | `src/decompress/huf_decompress.zig` (the C fast loops; `huf_decompress_amd64.S` is not ported) |
+| `decompress/zstd_decompress_internal.h` | `src/decompress/decompress_internal.zig` (`DCtx`, `DDict`, and the original's object layouts for the size functions) |
+| `decompress/zstd_decompress_block.c`, `.h` | `src/decompress/decompress_block.zig` |
+| `decompress/zstd_decompress.c` | `src/decompress/decompress.zig` (and `decompressFrameExact`, the port's own) |
+| `decompress/zstd_ddict.c`, `.h` | `src/decompress/ddict.zig` |
+| `zstd.h` (compression and decompression types) | `src/params.zig` |
+| `zstd.h` (functions) | `src/zstd.zig`, the public root |
 
 ## Names
 
@@ -80,6 +85,19 @@ produces the same bytes. These are the rules every file follows.
 - Every pointer a context holds into a caller's buffer (a referenced
   dictionary, a prefix, a stable input buffer) is valid only until the next
   call that resets the context; each doc comment says so.
+- The decoder's window (`previousDstEnd`, `prefixStart`, `virtualStart`,
+  `dictEnd`) is kept as addresses (`usize`), not pointers: `virtualStart` is
+  an offset from another buffer and may point outside any, and the original
+  computes with it under `ZSTD_ALLOW_POINTER_OVERFLOW_ATTR`. The sequence
+  copies work on addresses where the original's pointer arithmetic can step
+  before a buffer (`ZSTD_overlapCopy8`, the match of a corrupt offset), and
+  form a pointer only to read or write.
+- The decoder's deliberate over-reads and over-writes (`ZSTD_wildcopy`, the
+  16-byte literal copy, the 2-byte writes of the double-symbol Huffman
+  decoder) are kept: they stay inside the caller's buffers and the
+  context's own by the same checks as the original's. Copies the original
+  makes with `memcpy` between buffers that in-place decoding can overlap are
+  `@memmove`.
 
 ## Memory
 
@@ -110,7 +128,11 @@ produces the same bytes. These are the rules every file follows.
   `build_options.intrinsics`; with it off, the port takes the original's scalar
   path. The oracle tests compare each path with the original built the same way.
 - Zig 0.17 keeps LLVM's loop vectorizer off, so a loop with a run-time length
-  stays scalar. Where upstream's C relies on the C compiler vectorizing a loop
+  stays scalar. LLVM's SLP vectorizer is on, and packs independent scalar
+  chains into vectors: in the Huffman decoder's fast loops it packed the four
+  streams' bit containers into one register and paid an extract and an insert
+  for each table lookup. Those containers go through an empty `asm` that
+  keeps each in a general register (`inRegister`); it emits no instruction. Where upstream's C relies on the C compiler vectorizing a loop
   (match length counting, hashing, histograms), the port writes the vectors
   out with `@Vector`. LLVM still packs explicit vectors, small fixed arrays,
   `inline for` bodies and field-wise operations on small structs, the last

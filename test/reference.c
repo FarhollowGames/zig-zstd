@@ -1160,3 +1160,9 @@ size_t reference_lazyBlockTest(const reference_LazySetup* setup, const void* src
     memcpy(result->hashCache, ms.hashCache, sizeof(ms.hashCache));
     return lastLLSize;
 }
+
+/* ZSTD_DECOMPRESSION_MARGIN, a macro, as a function for the tests. */
+size_t reference_decompressionMargin(size_t originalSize, size_t blockSize)
+{
+    return ZSTD_DECOMPRESSION_MARGIN(originalSize, blockSize);
+}

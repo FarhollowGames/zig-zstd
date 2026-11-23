@@ -257,3 +257,68 @@ pub const SequenceFormat = enum(u32) {
     no_block_delimiters = 0,
     explicit_block_delimiters = 1,
 };
+
+/// The original's `ZSTD_dParameter`: the decompression parameters.
+pub const DParameter = enum(u32) {
+    /// The largest window a frame may ask for, as a power of 2; 0 for the
+    /// default, `window_log_limit_default`.
+    window_log_max = 100,
+    format = 1000,
+    /// 1: the caller keeps the output buffer stable for the whole frame,
+    /// and the context writes into it directly.
+    stable_out_buffer = 1001,
+    /// 1: checksums are read but not checked (`ForceIgnoreChecksum`).
+    force_ignore_checksum = 1002,
+    /// 1: several `DDict`s may be referenced, and each frame picks one by
+    /// its dictionary id (`RefMultipleDDicts`).
+    ref_multiple_ddicts = 1003,
+    /// 1: the original's x86-64 assembly Huffman loops are off. The port
+    /// has no assembly, so this only sets and reads the value.
+    disable_huffman_assembly = 1004,
+    /// The largest block the context accepts, or 0 for none below the
+    /// format's.
+    max_block_size = 1005,
+};
+
+/// The original's `ZSTD_forceIgnoreChecksum_e`.
+pub const ForceIgnoreChecksum = enum(u32) {
+    validate_checksum = 0,
+    ignore_checksum = 1,
+};
+
+/// The original's `ZSTD_refMultipleDDicts_e`.
+pub const RefMultipleDDicts = enum(u32) {
+    ref_single_ddict = 0,
+    ref_multiple_ddicts = 1,
+};
+
+/// The original's `ZSTD_FrameType_e`.
+pub const FrameType = enum(u32) {
+    frame = 0,
+    skippable_frame = 1,
+};
+
+/// The original's `ZSTD_FrameHeader`: a frame header's fields.
+pub const FrameHeader = struct {
+    /// `content_size_unknown` when the header does not say. For a skippable
+    /// frame, the size of its content.
+    frame_content_size: u64 = 0,
+    window_size: u64 = 0,
+    block_size_max: u32 = 0,
+    frame_type: FrameType = .frame,
+    header_size: u32 = 0,
+    /// For a skippable frame, its magic variant, 0 to 15.
+    dict_id: u32 = 0,
+    checksum_flag: bool = false,
+};
+
+/// The original's `ZSTD_nextInputType_e`: what the buffer-less decoder
+/// expects next.
+pub const NextInputType = enum(u32) {
+    frame_header = 0,
+    block_header = 1,
+    block = 2,
+    last_block = 3,
+    checksum = 4,
+    skippable_frame = 5,
+};

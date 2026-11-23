@@ -10,5 +10,7 @@ benchmark only; the zig-zstd package does not include them.
 - `LICENSE`, `COPYING`: upstream's two licences (BSD and GPLv2).
 - `tests/golden-compression`, `tests/golden-dictionaries`, `tests/dict-files`:
   upstream's test inputs.
+- `tests/golden-decompression`, `tests/golden-decompression-errors`:
+  upstream's frames that its decoder must decode, and must refuse.
 - `programs/datagen.c`, `datagen.h`, `lorem.c`, `lorem.h`, `platform.h`:
   upstream's generator of compressible test data.

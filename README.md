@@ -1,6 +1,6 @@
 # zig-zstd
 
-Ported from zstd 1.5.7 (`f8745da`), the compressor · Zig 0.17.0 · [status](STATUS.md)
+Ported from zstd 1.5.7 (`f8745da`), the compressor and the decompressor · Zig 0.17.0 · [status](STATUS.md)
 
 This port is not affiliated with or reviewed by the original authors. Its
 code was written with AI assistance for Farhollow Games, and is only machine
@@ -8,13 +8,13 @@ verified. See [the tests](doc/TESTING.md) and [parity with the original](doc/par
 
 ## What it is
 
-A Zig port of the compressor of Zstandard (zstd), the compression library by
-Yann Collet and Meta. It makes zstd frames at every level, one-shot or
-streamed, with dictionaries and on several threads, and gives the frames the
-original gives. Decompression is left to Zig's standard library
-(`std.compress.zstd`). It is pure Zig, with no dependencies beyond the
-standard library, and links no libc. The original is listed under
-[References](#references).
+A Zig port of Zstandard (zstd), the compression library by Yann Collet and
+Meta: its compressor and its decompressor. It makes zstd frames at every
+level, one-shot or streamed, with dictionaries and on several threads, and
+gives the frames the original gives. It decodes any input to the original's
+bytes, or refuses it with the original's error. It is pure Zig, with no
+dependencies beyond the standard library, and links no libc. The original is
+listed under [References](#references).
 
 ## Features
 
@@ -31,15 +31,26 @@ standard library, and links no libc. The original is listed under
 - Multithreaded compression on `std.Thread`, with a shared thread pool.
 - Every compression parameter of `zstd.h`, with the original's bounds, and
   static contexts over a caller's buffer.
+- Decompression of every frame the format allows: raw, RLE and compressed
+  blocks, every kind of literals section and sequence table, skippable
+  frames, the magicless format, checksums.
+- One-shot, buffer-less and streaming decompression (`decompressStream`,
+  with a bounded window and stable output), dictionaries (raw content or
+  full), prefixes and `DDict`s, several `DDict`s picked by dictionary id, and
+  the frame readers (`getFrameHeader`, `findFrameCompressedSize`,
+  `decompressBound`, ...).
+- `decompressFrameExact`: one frame into a buffer of its decoded size, with
+  no allocation, and the checksum always verified.
 - Memory comes from an `std.mem.Allocator`.
 
 ## Install
 
 ```sh
-zig fetch --save git+https://github.com/farhollowgames/zig-zstd#main
+zig fetch --save git+https://github.com/farhollowgames/zig-zstd#v0.2.0
 ```
 
-There is no release yet; this fetches `main`. The package needs Zig 0.17.0.
+This fetches release 0.2.0, the first with the decompressor. The package
+needs Zig 0.17.0.
 
 In `build.zig`:
 
@@ -74,8 +85,27 @@ pub fn pack(gpa: std.mem.Allocator, data: []const u8) ![]u8 {
 }
 ```
 
+Decompress a chunk whose size is known, as a game pack stores them, with a
+context that never allocates:
+
+```zig
+/// `chunk` is exactly the frame's decoded size; the frame's checksum is checked.
+pub fn unpack(dctx: *zstd.DCtx, chunk: []u8, frame: []const u8) zstd.Error!void {
+    try dctx.decompressFrameExact(chunk, frame, .{ .require_checksum = true });
+}
+```
+
+The context is about 96 KB, holds no resources and needs no freeing; keep one
+per thread and reuse it for every chunk:
+
+```zig
+const dctx = try gpa.create(zstd.DCtx);
+dctx.init();
+```
+
 The API follows the original's, function for function, without the `ZSTD_`
-prefix (`ZSTD_compress2` is `CCtx.compress2`). [`STATUS.md`](STATUS.md) maps
+prefix (`ZSTD_compress2` is `CCtx.compress2`, `ZSTD_decompressDCtx` is
+`DCtx.decompressDCtx`). [`STATUS.md`](STATUS.md) maps
 every function and parameter of the original to its counterpart,
 [`doc/porting.md`](doc/porting.md) says how the code maps to the original's,
 and the doc comments in [`src/`](src) describe each one.
@@ -86,13 +116,16 @@ The reasons are in [`doc/parity.md`](doc/parity.md).
 
 *Additions*:
 
-- None: the port has the original's compression features, and no more.
+- `DCtx.decompressFrameExact` and `DCtx.init`, for one frame of a known size
+  with no allocation.
 
 *Changes to expect*:
 
 - Functions return `Error!usize` or a value, in place of size codes that can be errors.
 - An `std.mem.Allocator` in place of `ZSTD_customMem`; `generateSequences` takes one for its scratch frame.
 - Workers need an `std.Io`, through `CCtx.setIo` or a thread pool given with `refThreadPool`.
+- A `DCtx` must not move while a frame is in progress.
+- `disable_huffman_assembly` changes nothing: the port has no assembly.
 - A static context refuses what would make the original allocate, and `initStatic` returns null over a workspace too small.
 - Broken caller promises, such as malformed sequences, panic in a safe build where the original's release build carries on.
 
@@ -104,8 +137,8 @@ short:
 
 - Dictionary training (`ZDICT_*`); the tests use the original's trainer to
   make dictionaries.
-- Decompression and the frame readers on its side: Zig's std decompresses
-  zstd.
+- The legacy formats (frames of zstd before 0.8), and the decoder's x86-64
+  assembly Huffman loops: the port runs the C loops in their place.
 - `ZSTD_customMem`: a `std.mem.Allocator` takes its place.
 - Run-time BMI2 dispatch, the switches that leave strategies out for binary
   size, tracing hooks, debug output and sanitizer annotations, and C build
@@ -115,13 +148,15 @@ short:
 
 ## Tests
 
-`zig build test` runs 312 tests: 58 unit tests and 127 oracle tests, run
+`zig build test` runs 423 tests: 63 unit tests and 180 oracle tests, run
 twice, once with both sides on their SIMD paths and once with both on their
 scalar paths. The oracle tests run the original and the port on the same
 inputs (upstream's test files, the Silesia and Canterbury corpora, hand-made
-edge cases and seeded fuzzing) and compare every frame byte for byte and
-every returned value, and decode every frame back through std's decoder and
-the original's.
+edge cases and seeded fuzzing). For the compressor they compare every frame
+byte for byte and every returned value, and decode every frame back through
+std's decoder and the original's. For the decompressor they decode the same
+input on both sides, valid, corrupt, truncated or random, and compare every
+result code, every decoded byte and every stream position.
 
 - [`doc/TESTING.md`](doc/TESTING.md): how the tests compare the port with
   the original, and what this repository's tests cover.
@@ -130,8 +165,26 @@ the original's.
 
 ## Speed
 
-Port time against original time, one core, one-shot compression of the
-Silesia corpus:
+Decompression, one thread, frames as Loomwork's packs: one frame an asset at
+level 19 with an 8 MiB window and a checksum. Decoded MB a second:
+
+| set | std | original | port | port vs std | port vs original |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| BC7 textures, a 2K mip chain a frame (5.6 MB) | 20.3 | 714.7 | 830.3 | 40.8x | 1.16 |
+| BC7 textures, a 2K mip 0 a frame (4.2 MB) | 20.5 | 637.8 | 737.0 | 36.0x | 1.16 |
+| BC7 textures, a 1K mip a frame (1.0 MB) | 16.2 | 785.5 | 887.6 | 54.9x | 1.13 |
+| BC5 normal maps, a 2K mip chain a frame (5.6 MB) | 20.9 | 612.2 | 698.4 | 33.4x | 1.14 |
+| text and source, a file a frame | 152.5 | 1064.1 | 1177.9 | 7.7x | 1.11 |
+| mixed pack, an asset a frame | 24.2 | 742.9 | 813.7 | 33.6x | 1.10 |
+
+std is Zig 0.17.0's `std.compress.zstd`, which reads checksums without
+verifying them; the original is zstd 1.5.7 at -O3 with its x86-64 assembly
+Huffman loops. Intel Xeon (Granite Rapids) cloud VM, 4 logical CPUs, the run
+pinned to one; Zig 0.17.0 ReleaseFast. Rows move by 10% to 20% between runs
+on this machine.
+
+Compression, port time against original time, one core, one-shot
+compression of the Silesia corpus:
 
 | feature | time, port / original | port vs original |
 | --- | ---: | ---: |
@@ -155,8 +208,8 @@ original at `-O3` with upstream's shared-library flags, both for `znver5`;
 the median of five runs (three from level 16); transparent huge pages off
 for the benchmark.
 
-- [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): every level, the flags on both
-  sides, the biases and the command.
+- [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): every row of both benchmarks, the
+  flags on both sides, the biases and the commands.
 
 ## Licence
 

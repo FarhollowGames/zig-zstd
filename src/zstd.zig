@@ -1,4 +1,4 @@
-//! A Zig port of Zstandard's compressor.
+//! A Zig port of Zstandard: its compressor and its decompressor.
 
 const std = @import("std");
 
@@ -10,6 +10,9 @@ pub const errorCode = @import("error.zig").errorCode;
 const compress_internal = @import("compress/compress_internal.zig");
 const compress_impl = @import("compress/compress.zig");
 const pool = @import("common/pool.zig");
+const decompress_internal = @import("decompress/decompress_internal.zig");
+const decompress_impl = @import("decompress/decompress.zig");
+const ddict_impl = @import("decompress/ddict.zig");
 
 /// A compression context: parameters, dictionaries, and the tables and
 /// buffers of the frame in progress, in one workspace. Made by `create`
@@ -63,6 +66,75 @@ pub const SequenceProducer = compress_internal.SequenceProducer;
 /// The value a `SequenceProducer` returns when it fails.
 pub const sequence_producer_error = compress_internal.sequence_producer_error;
 
+/// A decompression context, which is also a decompression stream. Made by
+/// `create` (freed by `destroy`), `initStatic` over a caller's buffer, or
+/// `init` on a context the caller places, which never allocates. Methods:
+/// one-shot decompression (`decompressDCtx`, `decompressUsingDict`,
+/// `decompressUsingDDict`, `decompressFrameExact`), parameters
+/// (`setParameter`, `getParameter`, `setMaxWindowSize`, `setFormat`,
+/// `reset`), dictionaries (`loadDictionary*`, `refPrefix*`, `refDDict`),
+/// the buffer-less API (`decompressBegin*`, `decompressContinue`,
+/// `nextSrcSizeToDecompress`, `nextInputType`, `decompressBlock`,
+/// `insertBlock`, `copy`) and streaming (`decompressStream`,
+/// `decompressStreamSimpleArgs`, `initDStream*`, `resetDStream`).
+///
+/// Buffers the context references, not copies: a dictionary loaded
+/// `by_ref` or a referenced `DDict` until it is replaced or cleared; a
+/// prefix until the next frame is decoded; the dictionary and the earlier
+/// outputs of a buffer-less frame until the frame ends; a static context's
+/// workspace for the context's whole life. The context points into itself
+/// during a frame, so it must not move until the frame ends. One thread may
+/// use a context at a time; contexts share no state, so each thread can
+/// have its own. A context stays usable after a call fails: the next frame
+/// starts afresh.
+pub const DCtx = decompress_internal.DCtx;
+/// A decompression stream is a decompression context (`ZSTD_DStream`).
+pub const DStream = DCtx;
+/// A dictionary digested for decompression, shared by any number of
+/// contexts.
+pub const DDict = decompress_internal.DDict;
+pub const FrameHeader = params.FrameHeader;
+pub const FrameExactOptions = decompress_impl.FrameExactOptions;
+
+pub const decompress = decompress_impl.decompress;
+pub const getFrameContentSize = decompress_impl.getFrameContentSize;
+pub const getDecompressedSize = decompress_impl.getDecompressedSize;
+pub const findDecompressedSize = decompress_impl.findDecompressedSize;
+pub const findFrameCompressedSize = decompress_impl.findFrameCompressedSize;
+pub const decompressBound = decompress_impl.decompressBound;
+pub const decompressionMargin = decompress_impl.decompressionMargin;
+pub const decompressionMarginBound = decompress_impl.decompressionMarginBound;
+pub const getFrameHeader = decompress_impl.getFrameHeader;
+pub const getFrameHeaderAdvanced = decompress_impl.getFrameHeaderAdvanced;
+pub const frameHeaderSize = decompress_impl.frameHeaderSize;
+pub const isFrame = decompress_impl.isFrame;
+pub const isSkippableFrame = decompress_impl.isSkippableFrame;
+pub const readSkippableFrame = decompress_impl.readSkippableFrame;
+pub const getDictIdFromDict = decompress_impl.getDictIdFromDict;
+pub const getDictIdFromFrame = decompress_impl.getDictIdFromFrame;
+pub const getDictIdFromDDict = ddict_impl.getDictIdFromDDict;
+pub const createDCtx = decompress_impl.createDCtx;
+pub const freeDCtx = decompress_impl.freeDCtx;
+pub const initDCtx = decompress_impl.initDCtx;
+pub const initStaticDCtx = decompress_impl.initStaticDCtx;
+pub const initStaticDStream = decompress_impl.initStaticDCtx;
+pub const createDDict = ddict_impl.createDDict;
+pub const createDDictByReference = ddict_impl.createDDictByReference;
+pub const createDDictAdvanced = ddict_impl.createDDictAdvanced;
+pub const initStaticDDict = ddict_impl.initStaticDDict;
+pub const freeDDict = ddict_impl.freeDDict;
+pub const sizeofDCtx = decompress_impl.sizeofDCtx;
+pub const sizeofDStream = decompress_impl.sizeofDStream;
+pub const sizeofDDict = ddict_impl.sizeofDDict;
+pub const estimateDCtxSize = decompress_impl.estimateDCtxSize;
+pub const estimateDDictSize = ddict_impl.estimateDDictSize;
+pub const estimateDStreamSize = decompress_impl.estimateDStreamSize;
+pub const estimateDStreamSizeFromFrame = decompress_impl.estimateDStreamSizeFromFrame;
+pub const decodingBufferSizeMin = decompress_impl.decodingBufferSizeMin;
+pub const dParamGetBounds = decompress_impl.dParamGetBounds;
+pub const dStreamInSize = decompress_impl.dStreamInSize;
+pub const dStreamOutSize = decompress_impl.dStreamOutSize;
+
 pub const compress = compress_impl.compress;
 pub const compressBound = compress_impl.compressBound;
 pub const minCLevel = compress_impl.minCLevel;
@@ -112,6 +184,11 @@ pub const internal = struct {
     pub const compress = @import("compress/compress.zig");
     pub const compress_superblock = @import("compress/compress_superblock.zig");
     pub const pre_split = @import("compress/pre_split.zig");
+    pub const huf_decompress = @import("decompress/huf_decompress.zig");
+    pub const decompress_block = @import("decompress/decompress_block.zig");
+    pub const decompress_internal = @import("decompress/decompress_internal.zig");
+    pub const decompress = @import("decompress/decompress.zig");
+    pub const ddict = @import("decompress/ddict.zig");
 };
 
 test {
@@ -139,4 +216,9 @@ test {
     _ = @import("compress/compress.zig");
     _ = @import("compress/compress_superblock.zig");
     _ = @import("compress/pre_split.zig");
+    _ = @import("decompress/huf_decompress.zig");
+    _ = @import("decompress/decompress_block.zig");
+    _ = @import("decompress/decompress_internal.zig");
+    _ = @import("decompress/decompress.zig");
+    _ = @import("decompress/ddict.zig");
 }
