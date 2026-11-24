@@ -16,6 +16,126 @@ The original is pinned in `reference/` (see `reference/README.md`): tag
 `v1.5.7`, commit `f8745da6ff1ad1e7bab384bd1f9d742439278e99`. `doc/porting.md`
 says how the code maps to it.
 
+## Compressor review report (24 November 2026)
+
+**Done**, on branch `review/compressor-perf-and-skeptic` from `main`
+(0.2.0), not merged: steps 5 to 7 on the rows that had not been through all
+three.
+
+1. What had not been reviewed. No row's state said `reviewed`, but the git
+   history shows most of them were: the compressor had three performance
+   passes and two skeptics on 11 and 12 November (`review/perf-and-skeptic`,
+   `review/perf-2`, `review/perf-3`, merged before 0.1.0; the notes below),
+   and the decompressor its pass, skeptic and Loomwork's review on 22 and 23
+   November (its report below). The remote has no `wip/review/*` branches,
+   only the tags `archive/wip/review/perf-2` and
+   `archive/wip/review/perf-and-skeptic`: stashes from the night of 11
+   November of work that landed later (`a9e003e`, `4b8fd58`). What none of
+   them covered:
+   - no benchmark had timed streaming compression in small pieces,
+     `CDict`s, long distance matching, `targetCBlockSize`,
+     `compressSequences`, `compressSequencesAndLiterals`, streaming
+     decompression or `DDict`s (`zig build bench` is one-shot `compress2`,
+     `zig build bench-decompress` is `decompressFrameExact`);
+   - no test had made an allocation fail, in any entry point;
+   - `compressSequences` was fuzzed with valid sequences only (its invalid
+     ones were made by hand), and five
+     oracle fuzz tests ran 250 cases, not 1,000;
+   - `-Dmultithread=false` (the `ZSTD_MULTITHREAD` row) had never been run
+     against the original: the oracle tests linked an original with workers;
+   - the thread pool (`ported`) had not been shared by contexts on several
+     threads at once.
+2. Skeptic (`test/review_test.zig`, both oracle binaries): every entry point
+   that allocates, with each allocation failing in turn and then every one
+   from it on (compress, compress2 on a reused context at five levels,
+   loadDictionary, createCDict, compressStream2 with and without long
+   distance matching, 2 and 3 workers, a shared pool, generateSequences,
+   and the decoder one shot, with a context, a `DDict`, a loaded dictionary
+   and streamed); `compressSequences` on 1,000 cases of random sequences,
+   validation on, both formats, some lengths and offsets at their 32-bit
+   bounds; four threads with a context each sharing a pool of two. Findings,
+   each with its test failing first (`aa9df5d`):
+   - crash on allocation failure: with 3 workers, a jobs table that could
+     not be allocated left the count of jobs at 5, and `zstdmt.zig`'s
+     power-of-2 assert panicked in safe builds before the context was freed;
+   - crash on caller sequences: `compressSequences` added a sequence's
+     lengths in u32 with `+`, an overflow panic in safe builds; the
+     original's sums wrap and it then reads past its input;
+   - the `ZSTD_MULTITHREAD` switch untested: `zig build test
+     -Dmultithread=false` failed 5 tests, all against an original with
+     workers;
+   - five oracle fuzz tests at 250 cases (`doc/TESTING.md` says 1,000);
+   - found by the first whole run in ReleaseFast: two Huffman oracle tests
+     compared table entries copied out of test workspaces left `undefined`,
+     equal on both sides in ReleaseSafe (0xAA) but stack garbage in
+     ReleaseFast, where both failed depending on the tests run before them
+     (on `main` too).
+   Probes that held: every other allocation failure (the port refuses with
+   `error.MemoryAllocation`, frees all it took, and gives the original's
+   frame or bytes once memory is back); the shared pool.
+3. Fixed: the assert holds only for a table that was made (`4694a0e`);
+   `compressSequences` refuses a sequence whose lengths add up to 2^32
+   less 128 KiB or more, or whose offset is within 3 of 2^32, with
+   `error.ExternalSequencesInvalid` (`4694a0e`, `doc/parity.md`); with
+   `-Dmultithread=false` the tests build the original without
+   `ZSTD_MULTITHREAD` (`ab650c7`): 167 of 178 pass, 11 skipped (the worker
+   tests, the Silesia tests, the 32-bit-only test), in the `oracle` binary,
+   37 minutes; the five fuzz tests run 1,000 cases, their first 250 the
+   same as before (`0535254`); the Huffman test workspaces start with the
+   0xAA bytes the safe builds gave them (`323d619`).
+4. Performance pass: `zig build bench-features` (`87915f6`,
+   `doc/BENCHMARKS.md` has the table) times those features against the
+   original, ReleaseFast against -O3, on this machine: a cloud VM, Intel(R)
+   Xeon(R) Processor @ 2.10GHz (Emerald Rapids), 4 logical CPUs, pinned to
+   one. Profiles are instruction counts from callgrind (no `perf` here), on
+   an `x86_64_v3` build of the benchmark, as valgrind has no AVX-512.
+   - Kept (`caed8fc`): the AVX2 paths of `get1BlockSummary` and
+     `convertSequencesNoRepcodes` load two sequences as one vector, where
+     `@bitCast(std.mem.toBytes(...))` compiled to a byte-wise copy.
+     `compressSequencesAndLiterals`, level 3, 16.2 MB, seconds a pass,
+     median (min-max), both builds in one session: before 0.0294
+     (0.0279-0.0308) and 0.0286 (0.0280-0.0312), after 0.0183
+     (0.0180-0.0271) and 0.0185 (0.0181-0.0286); 1.54 to 1.59 times the
+     original's time before, 0.98 to 1.04 after.
+   - Tried and dropped: the same paths testing their compare masks as bit
+     masks (94M to 70M instructions in the profile, no time gain beyond the
+     spread).
+   - The other rows are within noise of the original with the machine
+     idle (0.95 to 1.06). A run while the test suite shared the machine had
+     streaming decompression at 1.16 to 1.18; profiles of both sides show
+     the same instruction counts for it (sequence decoding 668M against
+     679M), so that gap was the load's, and nothing was changed.
+5. Rows now `reviewed`, those all three of steps 2 to 4 covered in this
+   pass: `ZSTD_compressStream2`, `ZSTD_createCDict` and its variants,
+   `ZSTD_compress_usingCDict` and `refCDict`, long distance matching and
+   its parameters, `ZSTD_compressSequences`, `ZSTD_decompressStream`,
+   `ZSTD_decompress_usingDDict` and `refDDict`.
+
+**Tests.** The whole suite passes in ReleaseSafe and in ReleaseFast
+(`zig build test -Dsilesia=false`, and with `-Dtest-optimize=ReleaseFast`,
+24 November, on a 4-core cloud VM): 439 of 447 in each mode, 8 skipped
+(the Silesia tests and the 32-bit-only test, in each oracle binary); 42
+minutes in ReleaseSafe and 39 in ReleaseFast. The ReleaseFast run is the one
+after the Huffman workspace fix; the ReleaseSafe run came before it, and
+the Huffman tests, rerun in ReleaseSafe after it, pass in both binaries.
+With `-Dmultithread=false`, 167 of 178 pass in the `oracle` binary, 11
+skipped.
+
+**For the author.**
+- The rows the November passes covered still say `oracle-tested`. Their
+  reviews are in this file's reports and notes; whether to mark them
+  `reviewed` from that history is your call. This pass marked only the rows
+  above.
+- Not covered by this pass, and so not `reviewed`: `compressSequencesAndLiterals`
+  had the performance change but no new skeptic probe (its malformed
+  sequences reach the asserts `doc/parity.md` lists); `loadDictionary`,
+  `generateSequences`, the contexts and the multithreading rows had the
+  allocation probes but no new timing; the `ZSTD_MULTITHREAD` row is now
+  `oracle-tested`.
+- `bench-features` rows on this VM spread by 10% to 25% of their medians;
+  a quieter machine would resolve gaps of a few percent that this one
+  cannot.
+
 ## Decompressor report (22 November 2026)
 
 **Done.** The decompressor of zstd 1.5.7, from the same pinned commit, is
@@ -575,7 +695,7 @@ Pushing: `main` and the review branch go to
 | `ZSTD_btopt`, `ZSTD_btultra`, `ZSTD_btultra2` (`zstd_opt.c`), with dictMatchState and extDict, btultra2's two passes over the first block | `opt.zig` | oracle-tested per block (`test/opt_test.zig`) and in frames |
 | the optimal parser's price model: dictionary entropy tables, fixed prices for tiny blocks, literal compression off, statistics across blocks | `opt.zig` | oracle-tested per block |
 | long distance match candidates in the optimal parser (`ZSTD_optLdm_*`) | `opt.zig` | oracle-tested per block, on hand-made candidates; and in frames with `ldm.zig`'s |
-| long-distance matching (`zstd_ldm.c`) | `ldm.zig` | oracle-tested below the frame (`test/ldm_test.zig`: gear hash splits, parameter defaults, sequence skipping and splitting, `ZSTD_ldm_generateSequences` over far repeats, dictionaries, full stores and the overflow correction, `ZSTD_ldm_blockCompress`) and in frames, single-threaded and with workers. `ZSTD_ldm_gear_reset` never stores its hash in the original, and the port keeps that |
+| long-distance matching (`zstd_ldm.c`) | `ldm.zig` | reviewed; oracle-tested below the frame (`test/ldm_test.zig`: gear hash splits, parameter defaults, sequence skipping and splitting, `ZSTD_ldm_generateSequences` over far repeats, dictionaries, full stores and the overflow correction, `ZSTD_ldm_blockCompress`) and in frames, single-threaded and with workers. `ZSTD_ldm_gear_reset` never stores its hash in the original, and the port keeps that |
 | `ZSTD_getCParams`, `ZSTD_getParams`, `ZSTD_checkCParams`, `ZSTD_adjustCParams` | same | oracle-tested |
 
 ## Entropy coding
@@ -597,7 +717,7 @@ Pushing: `main` and the review branch go to
 | `ZSTD_c_compressionLevel` | `.compression_level` | oracle-tested |
 | `ZSTD_c_windowLog`, `hashLog`, `chainLog`, `searchLog`, `minMatch`, `targetLength`, `strategy` | same names | oracle-tested |
 | `ZSTD_c_targetCBlockSize` (superblocks, `zstd_compress_superblock.c`) | `.target_cblock_size` | oracle-tested |
-| `ZSTD_c_enableLongDistanceMatching`, `ldmHashLog`, `ldmMinMatch`, `ldmBucketSizeLog`, `ldmHashRateLog` | same names | oracle-tested |
+| `ZSTD_c_enableLongDistanceMatching`, `ldmHashLog`, `ldmMinMatch`, `ldmBucketSizeLog`, `ldmHashRateLog` | same names | reviewed |
 | `ZSTD_c_contentSizeFlag`, `checksumFlag`, `dictIDFlag` | same names | oracle-tested |
 | `ZSTD_c_nbWorkers`, `jobSize`, `overlapLog`, `rsyncable` | same names | oracle-tested (bounds, set and get; frames with 1, 2 and 4 workers through `compress2` and `compressStream2`) |
 | `ZSTD_c_format` | `.format` | oracle-tested |
@@ -637,7 +757,7 @@ Pushing: `main` and the review branch go to
 
 | original | zig-zstd | state |
 | --- | --- | --- |
-| `ZSTD_compressStream2` with `ZSTD_e_continue`, `ZSTD_e_flush`, `ZSTD_e_end` | `CCtx.compressStream2` | oracle-tested (`test/stream_test.zig`: every call's result, positions and progression; every level, one-byte windows, fuzzed calls, modes, dictionaries, pledged sizes and frames; workers) |
+| `ZSTD_compressStream2` with `ZSTD_e_continue`, `ZSTD_e_flush`, `ZSTD_e_end` | `CCtx.compressStream2` | reviewed (`test/stream_test.zig`: every call's result, positions and progression; every level, one-byte windows, fuzzed calls, modes, dictionaries, pledged sizes and frames; workers) |
 | `ZSTD_compressStream2_simpleArgs` | `CCtx.compressStream2SimpleArgs` | oracle-tested |
 | `ZSTD_createCStream`, `freeCStream`, `CStreamInSize`, `CStreamOutSize` | `CStream` (= `CCtx`), `cStreamInSize`, `cStreamOutSize` | oracle-tested |
 | `ZSTD_initCStream`, `_srcSize`, `_usingDict`, `_advanced`, `_usingCDict`, `_usingCDict_advanced`, `ZSTD_resetCStream` | same | oracle-tested |
@@ -652,8 +772,8 @@ Pushing: `main` and the review branch go to
 | `ZSTD_compress_usingDict` | same | oracle-tested |
 | `ZSTD_CCtx_loadDictionary`, `_byReference`, `_advanced` (raw content, full dictionary, auto) | same | oracle-tested |
 | `ZSTD_CCtx_refPrefix`, `refPrefix_advanced` | same | oracle-tested |
-| `ZSTD_createCDict`, `freeCDict`, `_advanced`, `_advanced2`, `_byReference` | `CDict` | oracle-tested |
-| `ZSTD_compress_usingCDict`, `_usingCDict_advanced`, `ZSTD_CCtx_refCDict` | same | oracle-tested |
+| `ZSTD_createCDict`, `freeCDict`, `_advanced`, `_advanced2`, `_byReference` | `CDict` | reviewed |
+| `ZSTD_compress_usingCDict`, `_usingCDict_advanced`, `ZSTD_CCtx_refCDict` | same | reviewed |
 | attach, copy and load of a CDict (`forceAttachDict`) | in `compress.zig` | oracle-tested |
 | entropy tables from a full dictionary (`ZSTD_loadCEntropy`) | in `compress.zig` | oracle-tested |
 | `ZSTD_getDictID_fromDict`, `ZSTD_getDictID_fromCDict` | same | `getDictId` of a `CDict` oracle-tested; `ZSTD_getDictID_fromDict` is not ported |
@@ -663,7 +783,7 @@ Pushing: `main` and the review branch go to
 | original | zig-zstd | state |
 | --- | --- | --- |
 | `ZSTD_sequenceBound`, `ZSTD_generateSequences`, `ZSTD_mergeBlockDelimiters` | same | oracle-tested |
-| `ZSTD_compressSequences` (with and without delimiters, validation) | same | oracle-tested (`test/compress_sequences_test.zig`: generated and synthetic sequences, both formats, validation, repeat offsets, invalid sequences, small outputs) |
+| `ZSTD_compressSequences` (with and without delimiters, validation) | same | reviewed (`test/compress_sequences_test.zig`: generated and synthetic sequences, both formats, validation, repeat offsets, invalid sequences, small outputs) |
 | `ZSTD_compressSequencesAndLiterals` (AVX2 conversion path) | same | oracle-tested (generated and synthetic sequences, refusals; vector and scalar paths) |
 | `ZSTD_registerSequenceProducer`, `ZSTD_CCtxParams_registerSequenceProducer` (external match finders, fallback) | `SequenceProducer` | oracle-tested |
 
@@ -712,7 +832,7 @@ Pushing: `main` and the review branch go to
 | --- | --- | --- |
 | `ZSTD_decompress_usingDict` (raw content, full dictionaries) | `DCtx.decompressUsingDict` | oracle-tested (trained, raw, upstream's golden and zero-weight dictionaries, levels 1, 5, 19) |
 | `ZSTD_createDDict`, `_byReference`, `_advanced`, `ZSTD_freeDDict`, `ZSTD_initStaticDDict` | `DDict.create`, `createByReference`, `createAdvanced`, `destroy`, `initStatic` | oracle-tested |
-| `ZSTD_decompress_usingDDict`, `ZSTD_DCtx_refDDict` | `DCtx.decompressUsingDDict`, `DCtx.refDDict` | oracle-tested |
+| `ZSTD_decompress_usingDDict`, `ZSTD_DCtx_refDDict` | `DCtx.decompressUsingDDict`, `DCtx.refDDict` | reviewed |
 | `ZSTD_DCtx_loadDictionary`, `_byReference`, `_advanced` (each content type) | `DCtx.loadDictionary*` | oracle-tested |
 | `ZSTD_DCtx_refPrefix`, `_advanced` (one frame only) | `DCtx.refPrefix*` | oracle-tested |
 | `ZSTD_d_refMultipleDDicts` (each frame picks its dictionary by id, a hash set) | `.ref_multiple_ddicts` | oracle-tested (`dictionaries: several DDicts, ...`, past the set's first size) |
@@ -729,7 +849,7 @@ Pushing: `main` and the review branch go to
 | `ZSTD_DCtx_setParameter`, `ZSTD_DCtx_getParameter`, `ZSTD_dParam_getBounds`: `windowLogMax`, `format`, `stableOutBuffer`, `forceIgnoreChecksum`, `refMultipleDDicts`, `disableHuffmanAssembly`, `maxBlockSize` | `DCtx.setParameter`, `getParameter`, `dParamGetBounds` | oracle-tested (every value from 2 below to 2 above each bound, and the extremes) |
 | `ZSTD_DCtx_setMaxWindowSize`, `ZSTD_DCtx_reset` (each directive, mid-frame) | same names | oracle-tested |
 | buffer-less: `ZSTD_decompressBegin`, `_usingDict`, `_usingDDict`, `ZSTD_decompressContinue`, `ZSTD_nextSrcSizeToDecompress`, `ZSTD_nextInputType` | same names | oracle-tested (into one buffer and into two pieces, the first the previous segment) |
-| `ZSTD_decompressStream`, `ZSTD_decompressStream_simpleArgs` | `DCtx.decompressStream*` | oracle-tested (`streaming: ...`: every call's result, input and output positions; random sizes from 0 bytes up; several frames; the ring buffer wrapping) |
+| `ZSTD_decompressStream`, `ZSTD_decompressStream_simpleArgs` | `DCtx.decompressStream*` | reviewed (`streaming: ...`: every call's result, input and output positions; random sizes from 0 bytes up; several frames; the ring buffer wrapping) |
 | a bounded window: `ZSTD_d_windowLogMax`, frames that ask for more | `.window_log_max` | oracle-tested (`streaming: windows past the largest the stream accepts, and static streams`) |
 | `ZSTD_d_stableOutBuffer` | `.stable_out_buffer` | oracle-tested (a stable output, one too small, and one that moves) |
 | `ZSTD_createDStream`, `ZSTD_freeDStream`, `ZSTD_initDStream`, `_usingDict`, `_usingDDict`, `ZSTD_resetDStream`, `ZSTD_DStreamInSize`, `ZSTD_DStreamOutSize` | `DStream` (= `DCtx`), `initDStream*`, `resetDStream`, `dStreamInSize`, `dStreamOutSize` | oracle-tested |
@@ -739,7 +859,7 @@ Pushing: `main` and the review branch go to
 
 | original | zig-zstd | state |
 | --- | --- | --- |
-| `ZSTD_MULTITHREAD` | `-Dmultithread` (`build_options.multithread`) | ported (off: one shared pool runs jobs inline, and no multithreaded context is made) |
+| `ZSTD_MULTITHREAD` | `-Dmultithread` (`build_options.multithread`) | oracle-tested (`-Dmultithread=false` against the original built without it: one shared pool runs jobs inline, and no multithreaded context is made) |
 | `ZSTD_NO_INTRINSICS`, `ZSTD_ARCH_X86_SSE2`, `ZSTD_ARCH_X86_AVX2`, `ZSTD_ARCH_ARM_NEON` | `-Dintrinsics`, the target's CPU features | oracle-tested (the `oracle` build against the reference with SIMD, `oracle-scalar` with intrinsics off on both sides; NEON only by a unit test on x86) |
 | `ZSTD_CLEVEL_DEFAULT` | `params.clevel_default` | oracle-tested (level 0 and the default level against `ZSTD_getCParams`) |
 | `ZSTDMT_NBWORKERS_MAX`, `ZSTDMT_JOBSIZE_MIN`, `ZSTDMT_JOBSIZE_MAX` | `nbworkers_max`, `jobsize_min`, `jobsize_max` in `zstdmt.zig` | ported (the original's values; the parameter bounds in `compress.zig` use them) |

@@ -138,7 +138,7 @@ std's decoder (Zig 0.17.0) shape those round trips:
 
 ### Tests and counts
 
-`zig build test` runs 423 tests: 63 unit tests in `src/`, and 180 oracle
+`zig build test` runs 447 tests: 63 unit tests in `src/`, and 192 oracle
 tests run twice, as `oracle` (the port's `@Vector` paths against the
 original's SIMD paths) and as `oracle-scalar` (both sides on their scalar
 paths). `-Dcorpus=false` skips the corpus tests, and `-Doracle-scalar=false`
@@ -162,6 +162,7 @@ the second run.
 | `test/corpus_test.zig` | the corpora below |
 | `test/decompress_test.zig` | the decompressor: frames, the frame header, blocks, literals, sequences, repeat and long offsets, checksums, dictionaries, upstream's golden frames, the Canterbury corpus, in-place decoding, `decompressFrameExact` |
 | `test/decompress_skeptic_test.zig`, `test/decompress_loomwork_test.zig` | the decompressor's two reviews: a test per finding, and their probes that held up |
+| `test/review_test.zig` | the compressor review's: allocation failures through every entry point that allocates, random and out-of-range caller sequences, contexts on several threads sharing a pool |
 | `test/dstream_test.zig` | the decompressor: streaming, the buffer-less API, parameters, sizes and static objects, the Huffman decoders, and its fuzzers |
 
 ### Inputs
@@ -226,6 +227,18 @@ build. The tests of corrupt input turn the original's x86-64 assembly
 Huffman loops off, which stop at other places than its C loops on corrupt
 streams; on valid frames both run.
 
+### Allocation failures
+
+`test/review_test.zig` runs each entry point that allocates (one-shot and
+reused contexts, dictionaries and `CDict`s, streaming with and without long
+distance matching, workers and a shared pool, `generateSequences`, and the
+decoder's one-shot, context, `DDict`, loaded-dictionary and streaming paths)
+with each allocation failing in turn, then with every allocation from each
+one on failing. The port must refuse with `error.MemoryAllocation`, free
+everything it took, and give the original's frame or bytes from the same
+objects once memory is back. The allocator is safe to share between the
+workers' threads.
+
 ### Determinism
 
 The multithreaded tests drive the port and the original with 1, 2, 3, 4
@@ -237,6 +250,13 @@ that depend on the timing, in two runs of the original 9,167,360 and
 7,337,440 bytes.
 
 ### Build modes
+
+The compressor review's runs (24 November, a 4-core cloud VM, with
+`-Dsilesia=false`): the whole suite in ReleaseSafe in 42 minutes, 439 of
+447 passing and 8 skipped (the 3 Silesia corpus tests and the 32-bit-only
+test, in each oracle binary), and in ReleaseFast (`-Dtest-optimize=ReleaseFast`)
+in 39 minutes with the same counts, after the fix to the Huffman tests'
+workspaces (`STATUS.md`). It was the first whole run in ReleaseFast.
 
 The decompressor's last runs (23 November, a 4-core cloud VM, with
 `-Dsilesia=false`, as Silesia's host cannot be reached from it): the whole
@@ -266,6 +286,10 @@ with 306 tests, before the 32-bit fixes):
   3.5 GiB input through the real index correction. With `-Dcorpus=false`, 252
   of 258 oracle runs pass and the 6 corpus runs are skipped, in 17 minutes, at
   a peak of 6 GB.
+- `-Dmultithread=false` builds the port without workers and the original
+  without `ZSTD_MULTITHREAD`. With `-Dcorpus=true -Dsilesia=false
+  -Doracle-scalar=false` (24 November): 167 of 178 pass, 11 skipped (the
+  worker tests, the Silesia tests and the 32-bit-only test), in 37 minutes.
 - `-Dtest-optimize=Debug` on the block-level tests (50 of 50) and the frame
   tests (54 of 55; the CDict test was stopped after 18 minutes) found no
   panic that ReleaseSafe misses.

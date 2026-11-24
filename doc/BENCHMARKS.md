@@ -86,6 +86,54 @@ Notes:
   containers in general registers (`inRegister`, doc/porting.md), the port's
   loops are faster on this machine.
 
+## Other features
+
+`zig build bench-features` times, against the original, the features the
+two benchmarks above do not: streaming compression in 4 KiB pieces,
+`compressUsingCDict` with a 110 KB dictionary trained by the original on the
+inputs, long distance matching at window log 27, a target block size,
+`compressSequences` and `compressSequencesAndLiterals` (from the original's
+`generateSequences` of 1 MiB pieces), streaming decompression in 4 KiB
+pieces, and `decompressUsingDDict`. It needs only the Canterbury corpus:
+"files" are its 10 text files and the 67 C files of `reference/lib`, one
+frame a file; "joined" is its large and Calgary sets with those sources in
+one input of 16.2 MB; the long distance rows take the joined input twice,
+or its first 4 MiB twice at level 19, so the second half repeats the first.
+Each row's warm-up compares the two sides' output byte for byte, then the
+sides take turns for 11 passes, each pass repeated to 32 MB of input.
+
+The numbers below are one run on 24 November, on the code of the compressor
+review (branch `review/compressor-perf-and-skeptic`), the machine idle but
+for this run. They are measurements, not a verdict: on this VM a row's
+min-max spread is often 10% to 25% of its median, and in a run with the
+test suite on the other cores the streaming decompression rows came out
+1.16 to 1.18.
+
+- machine: a cloud VM, Intel(R) Xeon(R) Processor @ 2.10GHz (Emerald Rapids), 4 logical CPUs, the run pinned to one (`taskset -c 2`); one thread
+- Zig 0.17.0, target x86_64-linux-gnu, CPU model emeraldrapids; port ReleaseFast, original -O3 as for `zig build bench`
+- transparent huge pages off for the process
+
+| row | input | MB in | output bytes | original MB/s | port MB/s | original s (min-max) | port s (min-max) | port / original |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| compressStream2, 4 KiB pieces, level 1 | joined | 16.2 | 5050298 | 244.8 | 253.6 | 0.0661 (0.0577-0.0774) | 0.0638 (0.0583-0.0871) | 0.965, within noise |
+| compressStream2, 4 KiB pieces, level 3 | joined | 16.2 | 4661857 | 168.4 | 172.6 | 0.0960 (0.0921-0.1169) | 0.0937 (0.0899-0.1228) | 0.976, within noise |
+| compressStream2, 4 KiB pieces, level 19 | files | 9.7 | 2213377 | 2.0 | 1.9 | 4.8290 (4.6028-5.1313) | 5.0722 (4.6981-5.2315) | 1.050, within noise |
+| compressUsingCDict, 110 KB dictionary, level 1 | files | 9.7 | 3092017 | 269.5 | 273.5 | 0.0360 (0.0334-0.0435) | 0.0355 (0.0334-0.0444) | 0.985, within noise |
+| compressUsingCDict, 110 KB dictionary, level 3 | files | 9.7 | 2734666 | 178.0 | 176.2 | 0.0545 (0.0518-0.0669) | 0.0551 (0.0538-0.0649) | 1.010, within noise |
+| compressUsingCDict, 110 KB dictionary, level 19 | files | 9.7 | 2131974 | 2.2 | 2.2 | 4.4903 (4.3060-4.9562) | 4.4600 (4.2607-4.7600) | 0.993, within noise |
+| long distance matching, window log 27, level 3 | joined, twice | 32.4 | 4614561 | 256.1 | 247.8 | 0.1263 (0.1106-0.1394) | 0.1306 (0.1135-0.1495) | 1.034, within noise |
+| long distance matching, window log 27, level 19 | 4 MiB of joined, twice | 8.4 | 1041534 | 1.9 | 1.9 | 4.3097 (4.0449-4.7095) | 4.3331 (4.0899-4.6784) | 1.005, within noise |
+| targetCBlockSize 1340, level 3 | joined | 16.2 | 4672774 | 172.6 | 173.0 | 0.0937 (0.0848-0.1069) | 0.0935 (0.0866-0.1105) | 0.998, within noise |
+| compressSequences, explicit delimiters, level 3 | joined | 16.2 | 4761548 | 668.6 | 633.4 | 0.0242 (0.0231-0.0289) | 0.0255 (0.0250-0.0330) | 1.055, within noise |
+| compressSequencesAndLiterals, level 3 | joined | 16.2 | 4761548 | 894.2 | 862.0 | 0.0181 (0.0174-0.0208) | 0.0188 (0.0183-0.0191) | 1.037, within noise |
+| decompressStream, 4 KiB pieces, level 3 | joined | 16.2 | 16175372 | 702.6 | 738.8 | 0.0230 (0.0223-0.0284) | 0.0219 (0.0210-0.0290) | 0.951, within noise |
+| decompressStream, 4 KiB pieces, level 19 | joined | 16.2 | 16175372 | 697.7 | 683.5 | 0.0232 (0.0216-0.0293) | 0.0237 (0.0209-0.0255) | 1.021, within noise |
+| decompressUsingDDict, 110 KB dictionary, level 19 | files | 9.7 | 9706843 | 920.1 | 956.4 | 0.0106 (0.0102-0.0128) | 0.0101 (0.0099-0.0161) | 0.962, within noise |
+
+Before the review's one kept change, `compressSequencesAndLiterals` took
+1.54 to 1.59 times the original's time on the same machine (its AVX2
+conversion read two sequences through a byte-wise copy; `STATUS.md`).
+
 ## Compression
 
 `zig build bench` times the port in ReleaseFast against the original built

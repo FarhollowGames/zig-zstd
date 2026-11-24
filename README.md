@@ -148,7 +148,7 @@ short:
 
 ## Tests
 
-`zig build test` runs 423 tests: 63 unit tests and 180 oracle tests, run
+`zig build test` runs 447 tests: 63 unit tests and 192 oracle tests, run
 twice, once with both sides on their SIMD paths and once with both on their
 scalar paths. The oracle tests run the original and the port on the same
 inputs (upstream's test files, the Silesia and Canterbury corpora, hand-made
