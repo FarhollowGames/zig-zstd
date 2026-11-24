@@ -6764,6 +6764,12 @@ pub fn compressSequences(
 const sequence_vectors = build_options.intrinsics and builtin.cpu.arch == .x86_64 and
     std.Target.x86.featureSetHas(builtin.cpu.features, .avx2);
 
+/// The eight 32-bit fields of the sequences `i` and `i + 1`, in one load.
+inline fn twoSequences(seqs: []const Sequence, i: usize) @Vector(8, u32) {
+    const words: *const [8]u32 = @ptrCast(seqs[i..][0..2]);
+    return words.*;
+}
+
 /// `convertSequences_noRepcodes`: `in_seqs` as stored sequences with new
 /// offsets only. Returns 0, or for the one length over 0xFFFF its index
 /// plus 1, plus `in_seqs.len` for a literal length.
@@ -6779,7 +6785,7 @@ fn convertSequencesNoRepcodes(dst_seqs: []SeqDef, in_seqs: []const Sequence) usi
         const addition: V = .{ rep_num, 0, minus_min_match, 0, rep_num, 0, minus_min_match, 0 };
         const limit: @Vector(8, i32) = @splat(65535);
         while (i + 1 < in_seqs.len) : (i += 2) {
-            const vin: V = @bitCast(std.mem.toBytes(in_seqs[i..][0..2].*));
+            const vin: V = twoSequences(in_seqs, i);
             const vadd = vin +% addition;
             const over = @as(@Vector(8, i32), @bitCast(vadd)) > limit;
             dst_seqs[i] = .{
@@ -6913,7 +6919,7 @@ pub fn get1BlockSummary(seqs: []const Sequence) Error!BlockSummary {
         const zero_vec: V = @splat(0);
         var sum_vec = zero_vec;
         while (i + 2 <= seqs.len) : (i += 2) {
-            const data: V = @bitCast(std.mem.toBytes(seqs[i..][0..2].*));
+            const data: V = twoSequences(seqs, i);
             // The end of the block, in either.
             const is_zero = data == zero_vec;
             if (is_zero[2] or is_zero[6]) break;
