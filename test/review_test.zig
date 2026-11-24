@@ -625,7 +625,9 @@ test "review: compressSequences, random and out-of-range sequences, validation o
         framed += 1;
         try common.expectSameFrame(expected[0..code], actual[0..n]);
     }
-    std.debug.print("compressSequences: {d} cases compared, {d} frames\n", .{ compared, framed });
+    // With the default seeds, 770 cases reach the original and 141 make a frame.
+    try testing.expect(compared > common.fuzz_cases / 2);
+    try testing.expect(framed > 0);
 }
 
 const SharedPoolJob = struct {

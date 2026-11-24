@@ -6330,6 +6330,15 @@ fn validateSequence(
     if (match_length < match_len_lower_bound) return error.ExternalSequencesInvalid;
 }
 
+/// Refuses a sequence whose lengths or offset the original adds in 32
+/// bits past their range: there its sums wrap and it reads past its input.
+/// A sequence of any input under 4 GiB passes.
+fn checkSequenceRange(seq: Sequence) Error!void {
+    const length = @as(u64, seq.lit_length) + seq.match_length;
+    if (length > std.math.maxInt(u32) - params.block_size_max) return error.ExternalSequencesInvalid;
+    if (seq.offset > std.math.maxInt(u32) - rep_num) return error.ExternalSequencesInvalid;
+}
+
 /// `ZSTD_finalizeOffBase`: the off_base of a raw offset, a repeat code
 /// where it matches one.
 fn finalizeOffBase(raw_offset: u32, rep: *const [rep_num]u32, ll0: u32) u32 {
@@ -6372,6 +6381,7 @@ fn transferSequencesWBlockDelim(
     while (idx < in_seqs.len and (in_seqs[idx].match_length != 0 or
         in_seqs[idx].offset != 0)) : (idx += 1)
     {
+        try checkSequenceRange(in_seqs[idx]);
         const lit_length = in_seqs[idx].lit_length;
         const match_length = in_seqs[idx].match_length;
         var off_base: u32 = undefined;
@@ -6471,6 +6481,7 @@ fn transferSequencesNoDelim(
 
     while (end_pos_in_sequence != 0 and idx < in_seqs.len and !final_match_split) {
         const curr_seq = in_seqs[idx];
+        try checkSequenceRange(curr_seq);
         var lit_length = curr_seq.lit_length;
         var match_length = curr_seq.match_length;
         const raw_offset = curr_seq.offset;
@@ -6571,6 +6582,7 @@ fn blockSizeExplicitDelimiter(
     assert(spos <= in_seqs.len);
     while (spos < in_seqs.len) : (spos += 1) {
         end = in_seqs[spos].offset == 0;
+        try checkSequenceRange(in_seqs[spos]);
         block_size += in_seqs[spos].lit_length + in_seqs[spos].match_length;
         if (end) {
             // A delimiter has neither an offset nor a match.
