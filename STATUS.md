@@ -19,8 +19,9 @@ says how the code maps to it.
 ## Compressor review report (24 November 2026)
 
 **Done**, on branch `review/compressor-perf-and-skeptic` from `main`
-(0.2.0), not merged: steps 5 to 7 on the rows that had not been through all
-three.
+(0.2.0): steps 5 to 7 on the rows that had not been through all three.
+Released as 0.2.1 at the author's request: merged into `main` and tagged
+`v0.2.1` on 24 November.
 
 1. What had not been reviewed. No row's state said `reviewed`, but the git
    history shows most of them were: the compressor had three performance
@@ -110,6 +111,9 @@ three.
    `ZSTD_compress_usingCDict` and `refCDict`, long distance matching and
    its parameters, `ZSTD_compressSequences`, `ZSTD_decompressStream`,
    `ZSTD_decompress_usingDDict` and `refDDict`.
+6. Release: version 0.2.1 (fixes and one speed change, no new API; one
+   refusal the original does not make, `doc/parity.md`), README and
+   `build.zig.zon`; merged into `main` and tagged `v0.2.1`.
 
 **Tests.** The whole suite passes in ReleaseSafe and in ReleaseFast
 (`zig build test -Dsilesia=false`, and with `-Dtest-optimize=ReleaseFast`,

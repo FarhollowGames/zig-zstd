@@ -46,10 +46,11 @@ listed under [References](#references).
 ## Install
 
 ```sh
-zig fetch --save git+https://github.com/farhollowgames/zig-zstd#v0.2.0
+zig fetch --save git+https://github.com/farhollowgames/zig-zstd#v0.2.1
 ```
 
-This fetches release 0.2.0, the first with the decompressor. The package
+This fetches release 0.2.1: 0.2.0, the first with the decompressor, with
+the compressor review's fixes (`STATUS.md`). The package
 needs Zig 0.17.0.
 
 In `build.zig`:
