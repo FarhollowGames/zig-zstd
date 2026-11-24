@@ -786,7 +786,11 @@ const fill_celt: usize = @truncate(@as(u64, 0x5A5A5A5A5A5A5A5A));
 /// A workspace of `huf.workspace_size` bytes, aligned on 8, with room to
 /// misalign it.
 const Workspace = struct {
-    words: [huf.workspace_size_u64 + 1]u64 = undefined,
+    // Filled, not undefined: a Huffman table copied out of the workspace
+    // carries its unused entries along, on both sides, and the tests compare
+    // whole tables. Safe builds fill undefined memory with 0xAA; this is the
+    // same in every build mode.
+    words: [huf.workspace_size_u64 + 1]u64 = @splat(0xAAAA_AAAA_AAAA_AAAA),
 
     fn bytes(ws: *Workspace, offset: usize) []u8 {
         return std.mem.asBytes(&ws.words)[offset..][0..huf.workspace_size];

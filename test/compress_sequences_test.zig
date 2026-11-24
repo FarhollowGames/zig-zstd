@@ -299,7 +299,7 @@ test "compressSequences: synthetic sequences, long lengths, a dictionary, small 
     defer pair.deinit();
     const dict = try common.generated(30_000, 0.5, 0.3, 602);
     defer gpa.free(dict);
-    for (0..@max(1, common.fuzz_cases / 4)) |case| {
+    for (0..common.fuzz_cases) |case| {
         const seed = common.fuzzSeed(603) +% case;
         var prng: std.Random.DefaultPrng = .init(seed);
         const random = prng.random();
@@ -566,7 +566,7 @@ test "compressSequencesAndLiterals: generated and synthetic sequences, repeat of
             }
         }
     }
-    for (0..@max(1, common.fuzz_cases / 4)) |case| {
+    for (0..common.fuzz_cases) |case| {
         const seed = common.fuzzSeed(606) +% case;
         var prng: std.Random.DefaultPrng = .init(seed);
         const random = prng.random();

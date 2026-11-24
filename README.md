@@ -46,10 +46,11 @@ listed under [References](#references).
 ## Install
 
 ```sh
-zig fetch --save git+https://github.com/farhollowgames/zig-zstd#v0.2.0
+zig fetch --save git+https://github.com/farhollowgames/zig-zstd#v0.2.1
 ```
 
-This fetches release 0.2.0, the first with the decompressor. The package
+This fetches release 0.2.1: 0.2.0, the first with the decompressor, with
+the compressor review's fixes (`STATUS.md`). The package
 needs Zig 0.17.0.
 
 In `build.zig`:
@@ -148,7 +149,7 @@ short:
 
 ## Tests
 
-`zig build test` runs 423 tests: 63 unit tests and 180 oracle tests, run
+`zig build test` runs 447 tests: 63 unit tests and 192 oracle tests, run
 twice, once with both sides on their SIMD paths and once with both on their
 scalar paths. The oracle tests run the original and the port on the same
 inputs (upstream's test files, the Silesia and Canterbury corpora, hand-made

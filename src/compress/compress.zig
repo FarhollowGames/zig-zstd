@@ -6330,6 +6330,15 @@ fn validateSequence(
     if (match_length < match_len_lower_bound) return error.ExternalSequencesInvalid;
 }
 
+/// Refuses a sequence whose lengths or offset the original adds in 32
+/// bits past their range: there its sums wrap and it reads past its input.
+/// A sequence of any input under 4 GiB passes.
+fn checkSequenceRange(seq: Sequence) Error!void {
+    const length = @as(u64, seq.lit_length) + seq.match_length;
+    if (length > std.math.maxInt(u32) - params.block_size_max) return error.ExternalSequencesInvalid;
+    if (seq.offset > std.math.maxInt(u32) - rep_num) return error.ExternalSequencesInvalid;
+}
+
 /// `ZSTD_finalizeOffBase`: the off_base of a raw offset, a repeat code
 /// where it matches one.
 fn finalizeOffBase(raw_offset: u32, rep: *const [rep_num]u32, ll0: u32) u32 {
@@ -6372,6 +6381,7 @@ fn transferSequencesWBlockDelim(
     while (idx < in_seqs.len and (in_seqs[idx].match_length != 0 or
         in_seqs[idx].offset != 0)) : (idx += 1)
     {
+        try checkSequenceRange(in_seqs[idx]);
         const lit_length = in_seqs[idx].lit_length;
         const match_length = in_seqs[idx].match_length;
         var off_base: u32 = undefined;
@@ -6471,6 +6481,7 @@ fn transferSequencesNoDelim(
 
     while (end_pos_in_sequence != 0 and idx < in_seqs.len and !final_match_split) {
         const curr_seq = in_seqs[idx];
+        try checkSequenceRange(curr_seq);
         var lit_length = curr_seq.lit_length;
         var match_length = curr_seq.match_length;
         const raw_offset = curr_seq.offset;
@@ -6571,6 +6582,7 @@ fn blockSizeExplicitDelimiter(
     assert(spos <= in_seqs.len);
     while (spos < in_seqs.len) : (spos += 1) {
         end = in_seqs[spos].offset == 0;
+        try checkSequenceRange(in_seqs[spos]);
         block_size += in_seqs[spos].lit_length + in_seqs[spos].match_length;
         if (end) {
             // A delimiter has neither an offset nor a match.
@@ -6752,6 +6764,12 @@ pub fn compressSequences(
 const sequence_vectors = build_options.intrinsics and builtin.cpu.arch == .x86_64 and
     std.Target.x86.featureSetHas(builtin.cpu.features, .avx2);
 
+/// The eight 32-bit fields of the sequences `i` and `i + 1`, in one load.
+inline fn twoSequences(seqs: []const Sequence, i: usize) @Vector(8, u32) {
+    const words: *const [8]u32 = @ptrCast(seqs[i..][0..2]);
+    return words.*;
+}
+
 /// `convertSequences_noRepcodes`: `in_seqs` as stored sequences with new
 /// offsets only. Returns 0, or for the one length over 0xFFFF its index
 /// plus 1, plus `in_seqs.len` for a literal length.
@@ -6767,7 +6785,7 @@ fn convertSequencesNoRepcodes(dst_seqs: []SeqDef, in_seqs: []const Sequence) usi
         const addition: V = .{ rep_num, 0, minus_min_match, 0, rep_num, 0, minus_min_match, 0 };
         const limit: @Vector(8, i32) = @splat(65535);
         while (i + 1 < in_seqs.len) : (i += 2) {
-            const vin: V = @bitCast(std.mem.toBytes(in_seqs[i..][0..2].*));
+            const vin: V = twoSequences(in_seqs, i);
             const vadd = vin +% addition;
             const over = @as(@Vector(8, i32), @bitCast(vadd)) > limit;
             dst_seqs[i] = .{
@@ -6901,7 +6919,7 @@ pub fn get1BlockSummary(seqs: []const Sequence) Error!BlockSummary {
         const zero_vec: V = @splat(0);
         var sum_vec = zero_vec;
         while (i + 2 <= seqs.len) : (i += 2) {
-            const data: V = @bitCast(std.mem.toBytes(seqs[i..][0..2].*));
+            const data: V = twoSequences(seqs, i);
             // The end of the block, in either.
             const is_zero = data == zero_vec;
             if (is_zero[2] or is_zero[6]) break;

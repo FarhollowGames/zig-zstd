@@ -894,7 +894,9 @@ const MtCCtx = struct {
             mtctx.provided_factory = false;
         }
         mtctx.jobs = createJobsTable(gpa, &nb_jobs) orelse &.{};
-        assert(std.math.isPowerOfTwo(nb_jobs));
+        // A table that could not be made leaves the count as it was, which
+        // need not be a power of 2; the context is freed below.
+        assert(mtctx.jobs.len == 0 or std.math.isPowerOfTwo(nb_jobs));
         mtctx.job_id_mask = nb_jobs - 1;
         mtctx.buf_pool = BufferPool.create(gpa, io, bufPoolMaxNbBuffers(nb_workers));
         mtctx.cctx_pool = CCtxPool.create(gpa, io, nb_workers);

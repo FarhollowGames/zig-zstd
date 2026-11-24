@@ -110,6 +110,12 @@ the port is not finished, so this list can still change.
   original's workspace check refuses them too, unless its pointer sum wraps
   at the top of the address space. Where a table's own size wraps, the
   original reserves no room for it and writes past its workspace.
+- **Caller sequences past 32 bits.** `compressSequences` refuses a
+  sequence whose literal and match lengths add up to 2^32 less 128 KiB or
+  more, or whose offset is within 3 of 2^32, with
+  `error.ExternalSequencesInvalid`, validation on or off. The original adds
+  them in 32 bits, goes on with the wrapped sums and reads past its input.
+  No sequence of an input under 4 GiB is refused.
 - **The AVX2 sequence conversion.** The original's `convertSequences` takes
   its AVX2 path whenever `__AVX2__` is defined, even with
   `ZSTD_NO_INTRINSICS`; the port takes its vector path only with the

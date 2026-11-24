@@ -140,8 +140,13 @@ void reference_appliedCParams(const ZSTD_CCtx* cctx, ZSTD_compressionParameters*
  * compress/zstdmt_compress.c declares. */
 const void* reference_mtFactory(const ZSTD_CCtx* cctx)
 {
+#ifdef ZSTD_MULTITHREAD
     if (cctx->mtctx == NULL) return NULL;
     return *(const void* const*)(const void*)cctx->mtctx;
+#else
+    (void)cctx;
+    return NULL;
+#endif
 }
 
 /* The bit stream writer and the FSE symbol encoder are inline functions in

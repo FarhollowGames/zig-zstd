@@ -102,6 +102,7 @@ pub fn build(b: *std.Build) void {
         options.addOption(u32, "fuzz_cases", fuzz_cases);
         options.addOption(bool, "skeptic", skeptic);
         options.addOption(bool, "simd", variant.port_simd);
+        options.addOption(bool, "multithread", multithread);
         options.addOption(bool, "corpus", silesia != null and canterbury != null);
         options.addOption(bool, "canterbury_corpus", canterbury != null);
         if (silesia) |dep| options.addOptionPathDirectory("silesia", dep.path("")) else {
@@ -137,7 +138,7 @@ pub fn build(b: *std.Build) void {
             .filters = test_filters,
         });
         oracle.root_module.linkLibrary(
-            referenceLibrary(b, target, variant.reference_simd, correct_often),
+            referenceLibrary(b, target, variant.reference_simd, correct_often, multithread),
         );
         const run = b.addRunArtifact(oracle);
         test_step.dependOn(&run.step);
@@ -152,6 +153,7 @@ pub fn build(b: *std.Build) void {
     ) orelse 0;
     addBench(b, target, intrinsics, multithread, silesia, bench_code_shift);
     addDecompressBench(b, target, intrinsics, multithread, canterbury);
+    addFeaturesBench(b, target, intrinsics, multithread, canterbury);
 }
 
 fn zstdModule(
@@ -385,20 +387,30 @@ fn referenceLibrary(
     target: std.Build.ResolvedTarget,
     simd: bool,
     correct_often: bool,
+    multithread: bool,
 ) *std.Build.Step.Compile {
     const glibc = target.result.isGnuLibC();
-    const base_flags: []const []const u8 = if (simd) &reference_flags else &reference_scalar_flags;
+    const simd_flags: []const []const u8 = if (simd) &reference_flags else &reference_scalar_flags;
+    // A port built without workers is compared with the original built
+    // without ZSTD_MULTITHREAD.
+    var base_flags: std.ArrayList([]const u8) = .empty;
+    for (simd_flags) |flag| {
+        if (!multithread and std.mem.eql(u8, flag, "-DZSTD_MULTITHREAD")) continue;
+        base_flags.append(b.allocator, flag) catch @panic("OOM");
+    }
     const flags = if (correct_often)
         std.mem.concat(b.allocator, []const u8, &.{
-            base_flags,
+            base_flags.items,
             &.{"-DZSTD_WINDOW_OVERFLOW_CORRECT_FREQUENTLY=1"},
         }) catch @panic("OOM")
     else
-        base_flags;
+        base_flags.items;
     const library = b.addLibrary(.{
-        .name = if (correct_often)
-            (if (simd) "zstd_reference_often" else "zstd_reference_scalar_often")
-        else if (simd) "zstd_reference" else "zstd_reference_scalar",
+        .name = b.fmt("zstd_reference{s}{s}{s}", .{
+            if (simd) "" else "_scalar",
+            if (correct_often) "_often" else "",
+            if (multithread) "" else "_single",
+        }),
         .linkage = if (glibc) .dynamic else .static,
         .root_module = b.createModule(.{
             .target = target,
@@ -423,4 +435,46 @@ fn referenceLibrary(
     library.root_module.addIncludePath(b.path("reference/lib/common"));
     library.root_module.addIncludePath(b.path("reference/programs"));
     return library;
+}
+
+/// `zig build bench-features`: the port against the original on the features the other two
+/// benchmarks do not time (streaming in small pieces, dictionaries, long distance matching,
+/// super-blocks, the sequence API, streaming decompression), on the Canterbury corpus and
+/// reference/lib. Arguments after `--` go to the benchmark; the binary is also installed as
+/// zig-out/bin/bench-features.
+fn addFeaturesBench(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    intrinsics: bool,
+    multithread: bool,
+    canterbury: ?*std.Build.Dependency,
+) void {
+    const step = b.step("bench-features", "Time the port against the original on streaming, dictionaries, LDM and sequences (ReleaseFast)");
+    const options = b.addOptions();
+    if (canterbury) |dep| options.addOptionPathDirectory("canterbury", dep.path("")) else {
+        options.addOption([]const u8, "canterbury", "");
+    }
+    options.addOptionPathDirectory("reference", b.path("reference"));
+    const bench = b.addExecutable(.{
+        .name = "bench-features",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/features_bench.zig"),
+            .target = target,
+            .optimize = .fast,
+            .link_libc = true,
+            .imports = &.{
+                .{
+                    .name = "zstd",
+                    .module = zstdModule(b, target, .fast, intrinsics, multithread, false),
+                },
+                .{ .name = "upstream", .module = upstreamModule(b, target) },
+                .{ .name = "bench_options", .module = options.createModule() },
+            },
+        }),
+    });
+    bench.root_module.linkLibrary(benchReferenceLibrary(b, target));
+    const run = b.addRunArtifact(bench);
+    run.addPassthruArgs();
+    step.dependOn(&run.step);
+    step.dependOn(&b.addInstallArtifact(bench, .{}).step);
 }

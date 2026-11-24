@@ -82,3 +82,8 @@ test {
     // Loomwork's review of decompressFrameExact: findings and probes.
     _ = @import("decompress_loomwork_test.zig");
 }
+
+test {
+    // The compressor review's findings and probes.
+    _ = @import("review_test.zig");
+}
