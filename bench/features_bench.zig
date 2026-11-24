@@ -475,6 +475,21 @@ fn isSelected(selected: ?[]const u8, row: Row) bool {
     return false;
 }
 
+/// The logical CPUs /proc/cpuinfo lists, whatever this process may run on.
+fn cpuCount(io: std.Io, arena: std.mem.Allocator) usize {
+    const file = std.Io.Dir.cwd().openFile(io, "/proc/cpuinfo", .{}) catch return 0;
+    defer file.close(io);
+    var read_buffer: [4096]u8 = undefined;
+    var reader = file.readerStreaming(io, &read_buffer);
+    const text = reader.interface.allocRemaining(arena, .limited(1 << 22)) catch return 0;
+    var count: usize = 0;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "processor")) count += 1;
+    }
+    return count;
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     // The inputs' arena takes its memory from malloc, so the benchmark also runs under
@@ -530,9 +545,10 @@ pub fn main(init: std.process.Init) !void {
     } else &.{};
 
     const bullet = if (markdown) "- " else "";
-    try w.print("{s}machine: {s}, {d} logical CPUs, one thread\n", .{
+    try w.print("{s}machine: {s}, {d} logical CPUs, {d} of them available to this process; one thread\n", .{
         bullet,
         cpuModel(io, arena) orelse "unknown CPU",
+        cpuCount(io, arena),
         std.Thread.getCpuCount() catch 0,
     });
     try w.print("{s}Zig {s}, target {t}-{t}, CPU model {s}; port ReleaseFast, original -O3 (as `zig build bench`)\n", .{
