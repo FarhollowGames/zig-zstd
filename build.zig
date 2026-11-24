@@ -102,6 +102,7 @@ pub fn build(b: *std.Build) void {
         options.addOption(u32, "fuzz_cases", fuzz_cases);
         options.addOption(bool, "skeptic", skeptic);
         options.addOption(bool, "simd", variant.port_simd);
+        options.addOption(bool, "multithread", multithread);
         options.addOption(bool, "corpus", silesia != null and canterbury != null);
         options.addOption(bool, "canterbury_corpus", canterbury != null);
         if (silesia) |dep| options.addOptionPathDirectory("silesia", dep.path("")) else {
@@ -137,7 +138,7 @@ pub fn build(b: *std.Build) void {
             .filters = test_filters,
         });
         oracle.root_module.linkLibrary(
-            referenceLibrary(b, target, variant.reference_simd, correct_often),
+            referenceLibrary(b, target, variant.reference_simd, correct_often, multithread),
         );
         const run = b.addRunArtifact(oracle);
         test_step.dependOn(&run.step);
@@ -385,20 +386,30 @@ fn referenceLibrary(
     target: std.Build.ResolvedTarget,
     simd: bool,
     correct_often: bool,
+    multithread: bool,
 ) *std.Build.Step.Compile {
     const glibc = target.result.isGnuLibC();
-    const base_flags: []const []const u8 = if (simd) &reference_flags else &reference_scalar_flags;
+    const simd_flags: []const []const u8 = if (simd) &reference_flags else &reference_scalar_flags;
+    // A port built without workers is compared with the original built
+    // without ZSTD_MULTITHREAD.
+    var base_flags: std.ArrayList([]const u8) = .empty;
+    for (simd_flags) |flag| {
+        if (!multithread and std.mem.eql(u8, flag, "-DZSTD_MULTITHREAD")) continue;
+        base_flags.append(b.allocator, flag) catch @panic("OOM");
+    }
     const flags = if (correct_often)
         std.mem.concat(b.allocator, []const u8, &.{
-            base_flags,
+            base_flags.items,
             &.{"-DZSTD_WINDOW_OVERFLOW_CORRECT_FREQUENTLY=1"},
         }) catch @panic("OOM")
     else
-        base_flags;
+        base_flags.items;
     const library = b.addLibrary(.{
-        .name = if (correct_often)
-            (if (simd) "zstd_reference_often" else "zstd_reference_scalar_often")
-        else if (simd) "zstd_reference" else "zstd_reference_scalar",
+        .name = b.fmt("zstd_reference{s}{s}{s}", .{
+            if (simd) "" else "_scalar",
+            if (correct_often) "_often" else "",
+            if (multithread) "" else "_single",
+        }),
         .linkage = if (glibc) .dynamic else .static,
         .root_module = b.createModule(.{
             .target = target,

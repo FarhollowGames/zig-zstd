@@ -13,6 +13,7 @@ const common = @import("common.zig");
 const testing = std.testing;
 const gpa = common.gpa;
 const io = std.testing.io;
+const multithread = @import("test_options").multithread;
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 
@@ -338,6 +339,7 @@ test "review: compressStream2, every allocation failing in turn" {
 }
 
 test "review: compressStream2 with workers, every allocation failing in turn" {
+    if (!multithread) return error.SkipZigTest;
     const src = try common.generated(1_500_000, 0.5, 0.3, 908);
     defer gpa.free(src);
     try expectStreamed(src, .{ .level = 3, .workers = 2, .piece = 200_000, .window = 300_000 });
@@ -399,6 +401,7 @@ fn withThreadPool(failing: *Failing, src: []const u8, expected: []const u8) !voi
 }
 
 test "review: a shared thread pool and workers, every allocation failing in turn" {
+    if (!multithread) return error.SkipZigTest;
     const src = try common.generated(1_500_000, 0.5, 0.3, 910);
     defer gpa.free(src);
     const expected = try common.upstreamCompress2(&.{
@@ -664,6 +667,7 @@ const SharedPoolJob = struct {
 };
 
 test "review: contexts on four threads sharing a pool of two" {
+    if (!multithread) return error.SkipZigTest;
     const pool = zstd.createThreadPool(gpa, io, 2) orelse return error.OutOfMemory;
     defer zstd.freeThreadPool(pool);
     var jobs: [4]SharedPoolJob = undefined;
