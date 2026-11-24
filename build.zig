@@ -153,6 +153,7 @@ pub fn build(b: *std.Build) void {
     ) orelse 0;
     addBench(b, target, intrinsics, multithread, silesia, bench_code_shift);
     addDecompressBench(b, target, intrinsics, multithread, canterbury);
+    addFeaturesBench(b, target, intrinsics, multithread, canterbury);
 }
 
 fn zstdModule(
@@ -434,4 +435,46 @@ fn referenceLibrary(
     library.root_module.addIncludePath(b.path("reference/lib/common"));
     library.root_module.addIncludePath(b.path("reference/programs"));
     return library;
+}
+
+/// `zig build bench-features`: the port against the original on the features the other two
+/// benchmarks do not time (streaming in small pieces, dictionaries, long distance matching,
+/// super-blocks, the sequence API, streaming decompression), on the Canterbury corpus and
+/// reference/lib. Arguments after `--` go to the benchmark; the binary is also installed as
+/// zig-out/bin/bench-features.
+fn addFeaturesBench(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    intrinsics: bool,
+    multithread: bool,
+    canterbury: ?*std.Build.Dependency,
+) void {
+    const step = b.step("bench-features", "Time the port against the original on streaming, dictionaries, LDM and sequences (ReleaseFast)");
+    const options = b.addOptions();
+    if (canterbury) |dep| options.addOptionPathDirectory("canterbury", dep.path("")) else {
+        options.addOption([]const u8, "canterbury", "");
+    }
+    options.addOptionPathDirectory("reference", b.path("reference"));
+    const bench = b.addExecutable(.{
+        .name = "bench-features",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/features_bench.zig"),
+            .target = target,
+            .optimize = .fast,
+            .link_libc = true,
+            .imports = &.{
+                .{
+                    .name = "zstd",
+                    .module = zstdModule(b, target, .fast, intrinsics, multithread, false),
+                },
+                .{ .name = "upstream", .module = upstreamModule(b, target) },
+                .{ .name = "bench_options", .module = options.createModule() },
+            },
+        }),
+    });
+    bench.root_module.linkLibrary(benchReferenceLibrary(b, target));
+    const run = b.addRunArtifact(bench);
+    run.addPassthruArgs();
+    step.dependOn(&run.step);
+    step.dependOn(&b.addInstallArtifact(bench, .{}).step);
 }
