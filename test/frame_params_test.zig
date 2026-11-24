@@ -485,7 +485,7 @@ test "setCParams, setFParams, setParams, setPledgedSrcSize" {
     const seed = common.fuzzSeed(55);
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
-    for (0..common.fuzz_cases / 4) |case| {
+    for (0..common.fuzz_cases) |case| {
         errdefer std.debug.print("seed {d}, case {d}\n", .{ seed, case });
         const pair = try Pair.init();
         defer pair.deinit();
@@ -598,7 +598,7 @@ test "CCtxParams: set, get, init, reset, and applied to a context" {
     const held = try ParamsPair.init();
     defer held.deinit();
     try held.expectSame();
-    for (0..common.fuzz_cases / 4) |case| {
+    for (0..common.fuzz_cases) |case| {
         errdefer std.debug.print("seed {d}, case {d}\n", .{ seed, case });
         switch (random.uintLessThan(u32, 8)) {
             0 => {

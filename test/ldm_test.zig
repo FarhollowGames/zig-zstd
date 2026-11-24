@@ -857,7 +857,7 @@ test "blockCompress with fast and dfast matches the original's" {
 test "fuzz: blockCompress with fast and dfast matches the original's" {
     var prng: std.Random.DefaultPrng = .init(common.fuzzSeed(0xb10c));
     const random = prng.random();
-    for (0..common.fuzz_cases / 4) |case| {
+    for (0..common.fuzz_cases) |case| {
         const strategy: params.Strategy = if (random.boolean()) .fast else .dfast;
         const hash_log = random.intRangeAtMost(u32, 8, 17);
         const cparams: params.CompressionParameters = .{
